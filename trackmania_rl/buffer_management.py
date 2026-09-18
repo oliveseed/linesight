@@ -63,9 +63,19 @@ def fill_buffer_from_rollout_with_n_steps_rule(
             if (i < n_frames - 1 or ("race_time" not in rollout_results))
             else rollout_results["race_time"] - (n_frames - 2) * config_copy.ms_per_action
         )
-        reward_into[i] += (
+        vehicle_remaining_health = 1 - min(rollout_results["damages"][i], config_copy.max_damage_ceiling) / config_copy.max_damage_ceiling
+        vehicle_on_track = float(rollout_results["wheels_off_track"][i] == 0)
+        vehicle_traction = 1 - min(max(0, rollout_results["tires_skid"][i] - 10), 20) / 20
+        progress_reward = (
             rollout_results["meters_advanced_along_centerline"][i] - rollout_results["meters_advanced_along_centerline"][i - 1]
         ) * config_copy.reward_per_m_advanced_along_centerline
+        if progress_reward > 0:
+            progress_reward *= vehicle_on_track             # denial of reward if any wheel touching outside of track boundary
+            progress_reward *= vehicle_traction             # penalize proportionally to the skid amount exceeding 10, up to 10+20
+            progress_reward *= vehicle_remaining_health     # penalize proportionally to the damage level, up to max_damage_ceiling
+        reward_into[i] += progress_reward
+        # if vehicle_remaining_health <= 0:
+        #     reward_into[i] += config_copy.crashed_penalty
         if i < n_frames - 1:
             if config_copy.final_speed_reward_per_m_per_s != 0 and rollout_results["state_float"][i][58] > 0:
                 # car has velocity *forward*
@@ -95,6 +105,8 @@ def fill_buffer_from_rollout_with_n_steps_rule(
                     config_copy.engineered_reward_min_dist_to_cur_vcp,
                     min(config_copy.engineered_reward_max_dist_to_cur_vcp, np.linalg.norm(rollout_results["state_float"][i][62:65])),
                 )
+    # print(rollout_results["damages"])
+    # print(reward_into)
     for i in range(n_frames - 1):  # Loop over all frames that were generated
         # Switch memory buffer sometimes
         if random.random() < 0.1:
@@ -118,10 +130,11 @@ def fill_buffer_from_rollout_with_n_steps_rule(
 
         # Get action that was played
         action = rollout_results["actions"][i]
-        terminal_actions = float((n_frames - 1) - i) if "race_time" in rollout_results else math.inf
-        next_state_has_passed_finish = ((i + n_steps) == (n_frames - 1)) and ("race_time" in rollout_results)
+        is_terminal = ("race_time" in rollout_results)# or (rollout_results["damages"][-1] >= 1000)
+        terminal_actions = float((n_frames - 1) - i) if is_terminal else math.inf
+        next_state_is_terminal = ((i + n_steps) == (n_frames - 1)) and is_terminal
 
-        if not next_state_has_passed_finish:
+        if not next_state_is_terminal:
             next_state_img = rollout_results["frames"][i + n_steps]
             next_state_float = rollout_results["state_float"][i + n_steps]
             next_state_potential = get_potential(rollout_results["state_float"][i + n_steps])

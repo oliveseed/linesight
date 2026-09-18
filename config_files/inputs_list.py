@@ -1,77 +1,121 @@
 inputs = [
-    {  # 0 Forward
+    {  # 0 Increase throttle only
         "left": False,
         "right": False,
-        "accelerate": True,
-        "brake": False,
+        "center": False,
+        "increase_throttle": True,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 1 Forward left
+    {  # 1 Increase throttle and steer increasingly left
         "left": True,
         "right": False,
-        "accelerate": True,
-        "brake": False,
+        "center": False,
+        "increase_throttle": True,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 2 Forward right
+    {  # 2 Increase throttle and steer increasingly right
         "left": False,
         "right": True,
-        "accelerate": True,
-        "brake": False,
+        "center": False,
+        "increase_throttle": True,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 3 Nothing
+    {  # 3 Hold everything the same
         "left": False,
         "right": False,
-        "accelerate": False,
-        "brake": False,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 4 Nothing left
+    {  # 4 Steer increasingly left only
         "left": True,
         "right": False,
-        "accelerate": False,
-        "brake": False,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 5 Nothing right
+    {  # 5 Steer increasingly right only
         "left": False,
         "right": True,
-        "accelerate": False,
-        "brake": False,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 6 Brake
+    {  # 5 Center steering only
         "left": False,
         "right": False,
-        "accelerate": False,
-        "brake": True,
+        "center": True,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 7 Brake left
+    {  # 6 Brake harder only
+        "left": False,
+        "right": False,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": True,
+        "reset_throttle": False,
+        "reset_brake": False,
+    },
+    {  # 7 Brake harder and steer increasingly left
         "left": True,
         "right": False,
-        "accelerate": False,
-        "brake": True,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": True,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 8 Brake right
+    {  # 8 Brake harder and steer increasingly right
         "left": False,
         "right": True,
-        "accelerate": False,
-        "brake": True,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": True,
+        "reset_throttle": False,
+        "reset_brake": False,
     },
-    {  # 9 Brake and accelerate
+    {  # 9 Fully lift off throttle only
         "left": False,
         "right": False,
-        "accelerate": True,
-        "brake": True,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": True,
+        "reset_brake": False,
     },
-    {  # 10 Brake and accelerate left
-        "left": True,
-        "right": False,
-        "accelerate": True,
-        "brake": True,
-    },
-    {  # 11 Brake and accelerate right
+    {  # 10 Fully lift off brake only
         "left": False,
-        "right": True,
-        "accelerate": True,
-        "brake": True,
+        "right": False,
+        "center": False,
+        "increase_throttle": False,
+        "increase_brake": False,
+        "reset_throttle": False,
+        "reset_brake": True,
     },
+    # {  # 11 Toggle parking brake only (does nothing for now)
+    #     "left": False,
+    #     "right": False,
+    #     "center": False,
+    #     "increase_throttle": False,
+    #     "increase_brake": False,
+    #     "reset_throttle": False,
+    #     "reset_brake": False,
+    # },
 ]
 
-action_forward_idx = 0  # Accelerate forward, don't turn
-action_backward_idx = 6  # Go backward, don't turn
+action_forward_idx = 0  # Increase throttle, don't turn

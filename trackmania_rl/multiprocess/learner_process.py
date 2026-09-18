@@ -320,7 +320,7 @@ def learner_process_fn(
             f"mean_action_gap_{map_name}": -(
                 np.array(rollout_results["q_values"]) - np.array(rollout_results["q_values"]).max(axis=1, initial=None).reshape(-1, 1)
             ).mean(),
-            f"single_zone_reached_{map_status}_{map_name}": rollout_results["furthest_zone_idx"],
+            # f"single_zone_reached_{map_status}_{map_name}": rollout_results["furthest_zone_idx"],
             "instrumentation__answer_normal_step": end_race_stats["instrumentation__answer_normal_step"],
             "instrumentation__answer_action_step": end_race_stats["instrumentation__answer_action_step"],
             "instrumentation__between_run_steps": end_race_stats["instrumentation__between_run_steps"],
@@ -334,10 +334,13 @@ def learner_process_fn(
         }
         print("Race time ratio  ", race_stats_to_write[f"race_time_ratio_{map_name}"])
 
+        if end_race_stats["is_start_at_beginning"]:
+            race_stats_to_write[f"single_zone_reached_{map_status}_{map_name}"] = rollout_results["furthest_zone_idx"]
+        
         if not is_explo:
             race_stats_to_write[f"avg_Q_{map_status}_{map_name}"] = np.mean(rollout_results["q_values"])
 
-        if end_race_stats["race_finished"]:
+        if end_race_stats["race_finished"] and end_race_stats["is_start_at_beginning"]:
             race_stats_to_write[f"{'explo' if is_explo else 'eval'}_race_time_finished_{map_status}_{map_name}"] = (
                 end_race_stats["race_time"] / 1000
             )
@@ -350,6 +353,7 @@ def learner_process_fn(
         if (
             (not is_explo)
             and end_race_stats["race_finished"]
+            and end_race_stats["is_start_at_beginning"]
             and end_race_stats["race_time"] < 1.02 * accumulated_stats["rolling_mean_ms"][map_name]
         ):
             race_stats_to_write[f"eval_race_time_robust_{map_status}_{map_name}"] = end_race_stats["race_time"] / 1000
@@ -391,7 +395,7 @@ def learner_process_fn(
         #   SAVE STUFF IF THIS WAS A GOOD RACE
         # ===============================================
 
-        if end_race_stats["race_time"] < accumulated_stats["alltime_min_ms"].get(map_name, 99999999999):
+        if end_race_stats["is_start_at_beginning"] and end_race_stats["race_time"] < accumulated_stats["alltime_min_ms"].get(map_name, 99999999999):
             # This is a new alltime_minimum
             accumulated_stats["alltime_min_ms"][map_name] = end_race_stats["race_time"]
             if accumulated_stats["cumul_number_frames_played"] > config_copy.frames_before_save_best_runs:
@@ -411,7 +415,7 @@ def learner_process_fn(
                     scaler,
                 )
 
-        if end_race_stats["race_time"] < config_copy.threshold_to_save_all_runs_ms:
+        if end_race_stats["is_start_at_beginning"] and end_race_stats["race_time"] < config_copy.threshold_to_save_all_runs_ms:
             race_time_ms = end_race_stats["race_time"]
             name = f"{map_name}_{race_time_ms // 1000}_{race_time_ms % 1000:03d}_{datetime.now().strftime('%m%d_%H%M%S')}_{accumulated_stats['cumul_number_frames_played']}_{'explo' if is_explo else 'eval'}"
             utilities.save_run(

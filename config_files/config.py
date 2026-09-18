@@ -28,7 +28,7 @@ from config_files.user_config import *
 W_downsized = 160
 H_downsized = 120
 
-run_name = "run_name_to_be_changed"
+run_name = "test_crap_19"
 running_speed = 80
 
 tm_engine_step_per_action = 5
@@ -40,7 +40,7 @@ n_zone_centers_extrapolate_after_end_of_map = 1000
 n_zone_centers_extrapolate_before_start_of_map = 20
 n_prev_actions_in_inputs = 5
 n_contact_material_physics_behavior_types = 4  # See contact_materials.py
-cutoff_rollout_if_race_not_finished_within_duration_ms = 300_000
+cutoff_rollout_if_race_not_finished_within_duration_ms = 600_000
 cutoff_rollout_if_no_vcp_passed_within_duration_ms = 2_000
 
 temporal_mini_race_duration_ms = 7000
@@ -51,7 +51,7 @@ min_horizon_to_update_priority_actions = temporal_mini_race_duration_actions - 4
 # If mini_race_time == mini_race_duration this is the end of the minirace
 margin_to_announce_finish_meters = 700
 
-global_schedule_speed = 1
+global_schedule_speed = 1.0
 
 epsilon_schedule = [
     (0, 1),
@@ -83,6 +83,8 @@ engineered_close_to_vcp_reward_schedule = [
 n_steps = 3
 constant_reward_per_ms = -6 / 5000
 reward_per_m_advanced_along_centerline = 5 / 500
+max_damage_ceiling = 1000
+crashed_penalty = -10
 
 float_input_dim = 27 + 3 * n_zone_centers_in_inputs + 4 * n_prev_actions_in_inputs + 4 * n_contact_material_physics_behavior_types + 1
 float_hidden_dim = 256
@@ -92,7 +94,7 @@ iqn_embedding_dimension = 64
 iqn_n = 8  # must be an even number because we sample tau symmetrically around 0.5
 iqn_k = 32  # must be an even number because we sample tau symmetrically around 0.5
 iqn_kappa = 5e-3
-use_ddqn = False
+use_ddqn = True
 
 prio_alpha = np.float32(0)  # Rainbow-IQN paper: 0.2, Rainbow paper: 0.5, PER paper 0.6
 prio_epsilon = np.float32(2e-3)  # Defaults to 10^-6 in stable-baselines
@@ -168,7 +170,7 @@ use_jit = True
 # gpu_collectors_count is the number of Trackmania instances that will be launched in parallel.
 # It is recommended that users adjust this number depending on the performance of their machine.
 # We recommend trying different values and finding the one that maximises the number of batches done per unit of time.
-gpu_collectors_count = 2
+gpu_collectors_count = 1
 
 send_shared_network_every_n_batches = 10
 update_inference_network_every_n_actions = 20

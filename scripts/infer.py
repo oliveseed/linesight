@@ -51,7 +51,7 @@ from torch.multiprocessing import Lock
 
 from config_files import config_copy
 from trackmania_rl.agents.iqn import make_untrained_iqn_network
-from trackmania_rl.multiprocess.collector_process import collector_process_fn
+from trackmania_rl.multiprocess.inference_process import inference_process_fn
 from trackmania_rl.multiprocess.learner_process import learner_process_fn
 from trackmania_rl.utilities import set_random_seed
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     # Start worker process
     collector_processes = [
         mp.Process(
-            target=collector_process_fn,
+            target=inference_process_fn,
             args=(
                 rollout_queue,
                 uncompiled_shared_network,
@@ -131,15 +131,11 @@ if __name__ == "__main__":
                 process_number,
             ),
         )
-        for rollout_queue, process_number in zip(rollout_queues, range(config_copy.gpu_collectors_count))
+        # for rollout_queue, process_number in zip(rollout_queues, range(config_copy.gpu_collectors_count))
+        for rollout_queue, process_number in zip(rollout_queues, range(1))
     ]
     for collector_process in collector_processes:
         collector_process.start()
-
-    # Start learner process
-    learner_process_fn(
-        rollout_queues, uncompiled_shared_network, shared_network_lock, shared_steps, base_dir, save_dir, tensorboard_base_dir
-    )  # Turn main process into learner process instead of starting a new one, this saves 1 CUDA context
 
     for collector_process in collector_processes:
         collector_process.join()

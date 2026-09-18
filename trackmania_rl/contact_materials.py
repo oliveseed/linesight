@@ -84,6 +84,43 @@ physics_group_fromstr = {
     "TurboRoulette": 4,
 }
 
+# physics_behavior_fromint = {
+#     ContactMaterial[material_string].value: physics_group for material_string, physics_group in physics_group_fromstr.items()
+# }
 physics_behavior_fromint = {
-    ContactMaterial[material_string].value: physics_group for material_string, physics_group in physics_group_fromstr.items()
+    -1: 0,  # no contact
+    1: 4,
+    2: 4,
+    3: 4,
+    4: 4,
+    5: 4,
+    6: 4,   # wood
+    7: 4,
+    8: 4,
+    9: 4,
+    10: 1,  # concrete
+    11: 4,
+    12: 4,
+    13: 1,  # rock
+    14: 4,
+    15: 2,  # dirt
+    16: 3,  # sand
+    17: 4,
+    18: 3,  # mud
+    19: 3,  # sand
+    20: 2,  # grass
+    21: 4,  # ice
+    22: 4,
+    23: 4,
+    24: 4,
+    25: 4,
+    26: 4,
+    27: 4,
+    28: 4,
+    29: 4,
+    30: 1,  # bricks
+    31: 4,
 }
+
+# for racetracks
+forbidden_materials = [19, 20]
