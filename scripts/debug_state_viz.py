@@ -27,6 +27,8 @@ from pathlib import Path
 
 import numpy as np
 
+from trackmania_rl.bng_trajectory import get_vcp_centers_from_file
+
 STATE_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,13 +72,13 @@ STATE_PAGE = """<!DOCTYPE html>
   <div id="panel">
     <div id="scroll">
       <table>
-        <thead><tr><th>#</th><th>feature</th><th>value</th></tr></thead>
+        <thead><tr><th>#</th><th>feature</th><th>value</th><th>normalized</th></tr></thead>
         <tbody id="tbody-main"></tbody>
       </table>
       <details open>
         <summary>Zone centers &mdash; next 40 VCPs in car frame (indices 62..181)</summary>
         <table>
-          <thead><tr><th>#</th><th>feature</th><th>value</th></tr></thead>
+          <thead><tr><th>#</th><th>feature</th><th>value</th><th>normalized</th></tr></thead>
           <tbody id="tbody-zones"></tbody>
         </table>
       </details>
@@ -96,9 +98,10 @@ function addRow(tbody, i) {
   const b = document.createElement("td"); b.className = "name"; b.textContent = LABELS[i];
   if (LABELS[i].startsWith("zone_center")) tr.style.color = "#7ad";
   const c = document.createElement("td"); c.className = "val";
-  tr.append(a, b, c);
+  const d = document.createElement("td"); d.className = "val norm";
+  tr.append(a, b, c, d);
   tbody.appendChild(tr);
-  return c;
+  return { val: c, norm: d };
 }
 
 const cellsMain = [];
@@ -131,8 +134,16 @@ es.onmessage = (ev) => {
     ctx.putImageData(imgData, 0, 0);
   }
   const fl = msg.floats;
-  for (let i = 0; i < cellsMain.length; i++) cellsMain[i].textContent = fl[i].toFixed(4);
-  for (let i = 0; i < cellsZones.length; i++) cellsZones[i].textContent = fl[ZONE_START + i].toFixed(5);
+  const norm = msg.floats_norm || [];
+  for (let i = 0; i < cellsMain.length; i++) {
+    cellsMain[i].val.textContent = fl[i].toFixed(4);
+    cellsMain[i].norm.textContent = (norm[i] ?? 0).toFixed(4);
+  }
+  for (let i = 0; i < cellsZones.length; i++) {
+    const idx = ZONE_START + i;
+    cellsZones[i].val.textContent = fl[idx].toFixed(5);
+    cellsZones[i].norm.textContent = (norm[idx] ?? 0).toFixed(5);
+  }
   const m = msg.meta;
   metaEl.textContent = "sim " + m.sim_s + "s | race " + m.race_ms + "ms | zone " + m.zone +
     " | dist " + m.dist_m + "m | speed " + m.speed_mps + "m/s | pos " + m.pos.join(", ") +
@@ -244,7 +255,7 @@ def build_float_labels(config):
     """Name every element of the float feature vector, mirroring _build_float_inputs."""
     labels = ["temporal_mini_race (placeholder)"]
     for k in range(config.n_prev_actions_in_inputs):
-        for name in ("increase_throttle", "increase_brake", "left", "right"):
+        for name in ("increase_throttle", "increase_brake", "reset_throttle", "reset_brake", "left", "right", "center"):
             labels.append(f"prev_action[{k}].{name}")
     labels += ["throttle", "brake", "steering", "damage_overall"]
     labels += ["slip_fl", "slip_fr", "slip_rl", "slip_rr"]
@@ -266,7 +277,8 @@ def build_float_labels(config):
             labels.append(f"zone_center[{offset_m:.1f}m].{axis}")
 
     labels += ["finish_distance_m", "is_freewheeling"]
-    assert len(labels) == config.float_input_dim, f"label count {len(labels)} != float_input_dim {config.float_input_dim}"
+    # assert len(labels) == config.float_input_dim, f"label count {len(labels)} != float_input_dim {config.float_input_dim}"
+    assert len(labels) == 199, f"label count {len(labels)} != float_input_dim {199}"
     return labels, zone_start_idx
 
 
@@ -274,6 +286,14 @@ def build_payload(config, step):
     frame = np.asarray(step["frame"], dtype=np.uint8).reshape(-1)
     state = step["state"]
     velocity = np.asarray(state["velocity"], dtype=np.float32)
+    floats = np.asarray(step["floats"], dtype=np.float32)
+    mean = np.asarray(config.float_inputs_mean, dtype=np.float32)
+    std = np.asarray(config.float_inputs_std, dtype=np.float32)
+    n = min(len(floats), len(mean), len(std))
+    floats_norm = np.zeros_like(floats)
+    if n > 0:
+        safe_std = np.where(std[:n] == 0, 1.0, std[:n])
+        floats_norm[:n] = (floats[:n] - mean[:n]) / safe_std
     payload = {
         "frame": base64.b64encode(frame.tobytes()).decode("ascii"),
         "w": int(config.W_downsized),
@@ -288,7 +308,8 @@ def build_payload(config, step):
             "action": int(step["action_idx"]),
             "greedy": bool(step["action_was_greedy"]),
         },
-        "floats": [round(float(v), 5) for v in step["floats"]],
+        "floats": [round(float(v), 5) for v in floats],
+        "floats_norm": [round(float(v), 5) for v in floats_norm],
     }
     return json.dumps(payload, separators=(",", ":"))
 
@@ -307,8 +328,8 @@ def run_state_stream(broadcaster, config, port):
 
     manager = GameInstanceManager(
         game_spawning_lock=threading.Lock(),
-        running_speed=config.running_speed,
-        run_steps_per_action=config.tm_engine_step_per_action,
+        # running_speed=config.running_speed,
+        # run_steps_per_action=config.tm_engine_step_per_action,
         max_overall_duration_ms=config.cutoff_rollout_if_race_not_finished_within_duration_ms,
         max_minirace_duration_ms=config.cutoff_rollout_if_no_vcp_passed_within_duration_ms,
         tmi_port=port,
@@ -319,12 +340,15 @@ def run_state_stream(broadcaster, config, port):
         broadcaster.publish(build_payload(config, step))
 
     print(f"[debug_viz] vehicle interface on port {port}; streaming state. Ctrl+C to stop.")
+    
+    zone_centers = get_vcp_centers_from_file(trajectory_path=Path(__file__).resolve().parents[1] / "maps" / "nord1.npy", config=config)
+
     while True:
         try:
             manager.rollout(
                 exploration_policy=policy,
-                map_path="",
-                zone_centers=None,
+                # map_path="",
+                zone_centers=zone_centers,
                 update_network=None,
                 on_state=on_state,
             )

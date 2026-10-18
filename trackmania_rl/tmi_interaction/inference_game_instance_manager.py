@@ -274,6 +274,65 @@ class GameInstanceManager:
         )
         return float(distance_from_start_track_to_prev_zone_transition[seg_idx] + meters_in_current_zone)
 
+    def _point_to_segment_distance(self, position: npt.NDArray, start: npt.NDArray, end: npt.NDArray) -> float:
+        """Minimum Euclidean distance from `position` to the segment [start, end]."""
+        position = np.asarray(position, dtype=np.float32)
+        start = np.asarray(start, dtype=np.float32)
+        end = np.asarray(end, dtype=np.float32)
+        segment = end - start
+        segment_length_sq = float(segment.dot(segment))
+        if segment_length_sq <= 1e-12:
+            return float(np.linalg.norm(position - start))
+        t = float((position - start).dot(segment)) / segment_length_sq
+        t = min(1.0, max(0.0, t))
+        closest_point = start + t * segment
+        return float(np.linalg.norm(position - closest_point))
+
+    def _distance_to_centerline(self, position: npt.NDArray, current_zone_idx: int, zone_centers: npt.NDArray) -> float:
+        """Signed lateral distance from the vehicle position to the centerline.
+
+        Intended to be called right after `update_current_zone_idx` has advanced
+        or retreated `current_zone_idx`. That index is assumed to be the VCP that
+        lies closest to the vehicle, so the centerline segment the vehicle is on
+        is either the one between the current and the next zone, or the one
+        between the previous and the current zone. The segment with the smaller
+        distance to the vehicle is the one being traveled on.
+
+        Returns a signed lateral offset from the centerline: negative or
+        positive depending on which side of the track the vehicle is on, relative
+        to the direction of travel. Only the lateral component is considered; the
+        vertical (z) component of the offset does not matter.
+        """
+        centers = np.asarray(zone_centers, dtype=np.float32)
+        seg_idx = int(np.clip(current_zone_idx, 0, len(centers) - 2))
+        distance_to_next_segment = self._point_to_segment_distance(position, centers[seg_idx], centers[seg_idx + 1])
+        distance_to_previous_segment = (
+            self._point_to_segment_distance(position, centers[seg_idx - 1], centers[seg_idx]) if seg_idx > 0 else float("inf")
+        )
+        if distance_to_previous_segment <= distance_to_next_segment:
+            start, end = centers[seg_idx - 1], centers[seg_idx]
+        else:
+            start, end = centers[seg_idx], centers[seg_idx + 1]
+        return self._signed_lateral_distance(position, start, end)
+
+    def _signed_lateral_distance(self, position: npt.NDArray, start: npt.NDArray, end: npt.NDArray) -> float:
+        """Signed lateral offset of `position` from the segment start-end.
+
+        The sign is positive or negative depending on which side of the track the
+        vehicle is on, relative to the direction of travel. Only the lateral
+        component is returned; the vertical (z) offset does not matter.
+        """
+        start = np.asarray(start, dtype=np.float32)
+        end = np.asarray(end, dtype=np.float32)
+        segment = end - start
+        length = float(np.linalg.norm(segment))
+        if length <= 1e-12:
+            return 0.0
+        direction = segment / length
+        lateral_normal = np.cross(direction, np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        lateral_normal = lateral_normal / np.linalg.norm(lateral_normal)
+        return float(np.dot(np.asarray(position, dtype=np.float32) - start, lateral_normal))
+
     def rollout(
         self,
         exploration_policy: Callable,
@@ -292,15 +351,17 @@ class GameInstanceManager:
 
         actions = []
 
-        # start_zone_idx = first_zone_idx
-        start_zone_idx = np.random.randint(first_zone_idx + 17500, first_zone_idx + 18000)
+        # All rollouts start from the beginning of the map so that zone-indexed
+        # survival statistics are comparable across rollouts.
+        start_zone_idx = first_zone_idx
 
         self.last_rollout_crashed = False
-        current_zone_idx = start_zone_idx  # first_zone_idx
+        current_zone_idx = start_zone_idx
         last_progress_improvement_ms = 0
         n_th_action_we_compute = 0
         race_time_ms = 0
-        furthest_zone_idx = 0
+        furthest_zone_idx = start_zone_idx
+        truncation_reason = "error"
         # One-step action delay: the action applied at the state we have just
         # observed was computed from the previous state, while the game was
         # stepping. The very first action has no predecessor yet, so the default
@@ -334,7 +395,6 @@ class GameInstanceManager:
                     finish_idx,
                 )
 
-                # print("progress", current_zone_idx, rollout_results['furthest_zone_idx'], race_time_ms)
                 if current_zone_idx > furthest_zone_idx:
                     last_progress_improvement_ms = race_time_ms
                     furthest_zone_idx = current_zone_idx
@@ -361,29 +421,30 @@ class GameInstanceManager:
 
                 # frame = self._blank_frame()
                 frame = self.iface.get_visual_input(vis_type="depth")
-                # print(frame)
-                # TODO: check if first frame of rollout is black
 
                 # Finished the race (reached final real VCP).
                 if current_zone_idx >= finish_idx:
                     print(f"[TRUNCATION] vehicle {self.tmi_port} reached the finish")
+                    truncation_reason = "finish"
                     this_rollout_is_finished = True
                     break
 
                 # Failed to finish in time / no progress.
-                # if (
-                #     race_time_ms > self.max_overall_duration_ms
-                #     or race_time_ms > last_progress_improvement_ms + self.max_minirace_duration_ms
-                # ):
-                #     this_rollout_is_finished = True
-                #     print(f"[TRUNCATION] vehicle {self.tmi_port} timed out at zone {current_zone_idx}")
-                #     break
+                if (
+                    race_time_ms > self.max_overall_duration_ms
+                    or race_time_ms > last_progress_improvement_ms + self.max_minirace_duration_ms
+                ):
+                    print(f"[TRUNCATION] vehicle {self.tmi_port} timed out at zone {current_zone_idx}")
+                    truncation_reason = "timeout"
+                    this_rollout_is_finished = True
+                    break
 
                 # Vehicle got too damaged
-                # if state["damage_overall"] >= config_copy.max_damage_ceiling:
-                #     print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
-                #     this_rollout_is_finished = True
-                #     break
+                if state["damage_overall"] >= config_copy.max_damage_ceiling:
+                    print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
+                    truncation_reason = "crash"
+                    this_rollout_is_finished = True
+                    break
 
                 # Execute the action computed at the previous state, then let the
                 # game run the next physics step immediately. The policy below is
@@ -393,8 +454,6 @@ class GameInstanceManager:
                 actions.append(action_idx)
 
                 self.request_inputs(action_idx)
-                # # Apply the same action for run_steps_per_action physics ticks.
-                # for _ in range(self.run_steps_per_action):
                 self.iface.step_complete()
 
                 pending_action_idx, _, _, _ = exploration_policy(frame, floats)
@@ -412,7 +471,16 @@ class GameInstanceManager:
 
         except (ConnectionError, OSError, TimeoutError) as err:  # (ConnectionError, OSError, TimeoutError) as err:
             print("Cutoff rollout due to vehicle interface error:", err)
+            truncation_reason = "error"
             self.last_rollout_crashed = True
             self.iface = None
 
-        return None
+        result = {
+            "start_zone_idx": int(start_zone_idx),
+            "furthest_zone_idx": int(furthest_zone_idx),
+            "end_zone_idx": int(current_zone_idx),
+            "race_time_ms": int(race_time_ms),
+            "truncation_reason": truncation_reason,
+            "race_finished": truncation_reason == "finish",
+        }
+        return result
