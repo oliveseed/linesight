@@ -250,7 +250,7 @@ class Trainer:
                     [self.iqn_n, 1]
                 )  # (batch_size*iqn_n, 1)     a,b,c,d becomes a,b,c,d,a,b,c,d,a,b,c,d,... (iqn_n times)
                 gammas_terminal = gammas_terminal.unsqueeze(-1).repeat([self.iqn_n, 1])  # (batch_size*iqn_n, 1)
-                actions = actions.unsqueeze(-1).repeat([self.iqn_n, 1])  # (batch_size*iqn_n, 1)
+                actions = actions.unsqueeze(-1).repeat([self.iqn_n, 1]).long()  # (batch_size*iqn_n, 1)
                 #
                 #   Use target_network to evaluate the action chosen, per quantile.
                 #

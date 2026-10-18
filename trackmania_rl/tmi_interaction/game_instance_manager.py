@@ -117,7 +117,7 @@ class GameInstanceManager:
         right = np.asarray(state["right_vector"], dtype=np.float32)
         up = np.asarray(state["up_vector"], dtype=np.float32)
         forward = np.asarray(state["forward_vector"], dtype=np.float32)
-        return np.column_stack((right, up, forward)).astype(np.float32)
+        return np.column_stack((right, forward, up)).astype(np.float32)
 
     def _reset_to_zone(self, zone_centers, zone_idx):
         target_zone, next_zone = zone_centers[zone_idx], zone_centers[zone_idx+1]
@@ -132,6 +132,7 @@ class GameInstanceManager:
         state: Dict,
         current_zone_idx: int,
         zone_centers: npt.NDArray,
+        distance_to_centerline: float,
         distance_since_track_begin: float,
         distance_from_start_track_to_prev_zone_transition: npt.NDArray,
         rollout_results: Dict,
@@ -214,19 +215,19 @@ class GameInstanceManager:
             ]
         )
 
-        finish_distance = distance_from_start_track_to_prev_zone_transition[
-            len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map - 1
-            if len(distance_from_start_track_to_prev_zone_transition)
-            > len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map - 1
-            else -1
-        ]
+        # finish_distance = distance_from_start_track_to_prev_zone_transition[
+        #     len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map - 1
+        #     if len(distance_from_start_track_to_prev_zone_transition)
+        #     > len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map - 1
+        #     else -1
+        # ]
         # The distance array is indexed by zone transition; use finish_idx-aligned value.
-        finish_zone = len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map
-        finish_distance = distance_from_start_track_to_prev_zone_transition[
-            min(finish_zone - 1, len(distance_from_start_track_to_prev_zone_transition) - 1)
-        ]
+        # finish_zone = len(zone_centers) - config_copy.n_zone_centers_extrapolate_after_end_of_map
+        # finish_distance = distance_from_start_track_to_prev_zone_transition[
+        #     min(finish_zone - 1, len(distance_from_start_track_to_prev_zone_transition) - 1)
+        # ]
 
-        is_freewheeling = 1.0 if state["throttle"] <= 0.0 and state["brake"] <= 0.0 else 0.0
+        # is_freewheeling = 1.0 if state["throttle"] <= 0.0 and state["brake"] <= 0.0 else 0.0
 
         floats = np.hstack(
             (
@@ -235,7 +236,7 @@ class GameInstanceManager:
                     [
                         previous_action[input_str]
                         for previous_action in previous_actions
-                        for input_str in ["increase_throttle", "increase_brake", "left", "right"]
+                        for input_str in ["increase_throttle", "increase_brake", "reset_throttle", "reset_brake", "left", "right", "center"]
                     ],
                     dtype=np.float32,
                 ),
@@ -244,11 +245,12 @@ class GameInstanceManager:
                 state_car_velocity_in_car_reference_system.ravel(),
                 state_y_map_vector_in_car_reference_system.ravel(),
                 state_zone_center_coordinates_in_car_reference_system.ravel(),
-                min(
-                    config_copy.margin_to_announce_finish_meters,
-                    finish_distance - distance_since_track_begin,
-                ),
-                is_freewheeling,
+                # min(
+                #     config_copy.margin_to_announce_finish_meters,
+                #     finish_distance - distance_since_track_begin,
+                # ),
+                0,
+                distance_to_centerline,#is_freewheeling,
             )
         ).astype(np.float32)
         return floats
@@ -270,6 +272,65 @@ class GameInstanceManager:
             distance_between_zone_transitions[seg_idx],
         )
         return float(distance_from_start_track_to_prev_zone_transition[seg_idx] + meters_in_current_zone)
+
+    def _point_to_segment_distance(self, position: npt.NDArray, start: npt.NDArray, end: npt.NDArray) -> float:
+        """Minimum Euclidean distance from `position` to the segment [start, end]."""
+        position = np.asarray(position, dtype=np.float32)
+        start = np.asarray(start, dtype=np.float32)
+        end = np.asarray(end, dtype=np.float32)
+        segment = end - start
+        segment_length_sq = float(segment.dot(segment))
+        if segment_length_sq <= 1e-12:
+            return float(np.linalg.norm(position - start))
+        t = float((position - start).dot(segment)) / segment_length_sq
+        t = min(1.0, max(0.0, t))
+        closest_point = start + t * segment
+        return float(np.linalg.norm(position - closest_point))
+
+    def _distance_to_centerline(self, position: npt.NDArray, current_zone_idx: int, zone_centers: npt.NDArray) -> float:
+        """Signed lateral distance from the vehicle position to the centerline.
+
+        Intended to be called right after `update_current_zone_idx` has advanced
+        or retreated `current_zone_idx`. That index is assumed to be the VCP that
+        lies closest to the vehicle, so the centerline segment the vehicle is on
+        is either the one between the current and the next zone, or the one
+        between the previous and the current zone. The segment with the smaller
+        distance to the vehicle is the one being traveled on.
+
+        Returns a signed lateral offset from the centerline: negative or
+        positive depending on which side of the track the vehicle is on, relative
+        to the direction of travel. Only the lateral component is considered; the
+        vertical (z) component of the offset does not matter.
+        """
+        centers = np.asarray(zone_centers, dtype=np.float32)
+        seg_idx = int(np.clip(current_zone_idx, 0, len(centers) - 2))
+        distance_to_next_segment = self._point_to_segment_distance(position, centers[seg_idx], centers[seg_idx + 1])
+        distance_to_previous_segment = (
+            self._point_to_segment_distance(position, centers[seg_idx - 1], centers[seg_idx]) if seg_idx > 0 else float("inf")
+        )
+        if distance_to_previous_segment <= distance_to_next_segment:
+            start, end = centers[seg_idx - 1], centers[seg_idx]
+        else:
+            start, end = centers[seg_idx], centers[seg_idx + 1]
+        return self._signed_lateral_distance(position, start, end)
+
+    def _signed_lateral_distance(self, position: npt.NDArray, start: npt.NDArray, end: npt.NDArray) -> float:
+        """Signed lateral offset of `position` from the segment start-end.
+
+        The sign is positive or negative depending on which side of the track the
+        vehicle is on, relative to the direction of travel. Only the lateral
+        component is returned; the vertical (z) offset does not matter.
+        """
+        start = np.asarray(start, dtype=np.float32)
+        end = np.asarray(end, dtype=np.float32)
+        segment = end - start
+        length = float(np.linalg.norm(segment))
+        if length <= 1e-12:
+            return 0.0
+        direction = segment / length
+        lateral_normal = np.cross(direction, np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        lateral_normal = lateral_normal / np.linalg.norm(lateral_normal)
+        return float(np.dot(np.asarray(position, dtype=np.float32) - start, lateral_normal))
 
     def rollout(
         self,
@@ -371,6 +432,8 @@ class GameInstanceManager:
                     last_progress_improvement_ms = race_time_ms
                     rollout_results["furthest_zone_idx"] = current_zone_idx
 
+                distance_to_centerline = self._distance_to_centerline(position, current_zone_idx, zone_centers)
+                
                 distance_since_track_begin = self._meters_along_centerline(
                     position,
                     current_zone_idx,
@@ -387,6 +450,7 @@ class GameInstanceManager:
                     state,
                     current_zone_idx,
                     zone_centers,
+                    distance_to_centerline,
                     distance_since_track_begin,
                     distance_from_start_track_to_prev_zone_transition,
                     rollout_results,
@@ -394,7 +458,7 @@ class GameInstanceManager:
                 end_race_stats["instrumentation__grab_floats"] += time.perf_counter_ns() - pc_floats
 
                 # frame = self._blank_frame()
-                frame = self.iface.get_visual_input(vis_type="color")
+                frame = self.iface.get_visual_input(vis_type="depth")
 
                 # Finished the race (reached final real VCP).
                 if current_zone_idx >= finish_idx:
