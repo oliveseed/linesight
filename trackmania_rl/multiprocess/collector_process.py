@@ -29,14 +29,15 @@ def collector_process_fn(
     process_number: int,
 ):
     from trackmania_rl.map_loader import analyze_map_cycle, load_next_map_zone_centers
+    from trackmania_rl.bng_trajectory import get_vcp_centers_from_file
     from trackmania_rl.tmi_interaction import game_instance_manager
 
     set_random_seed(process_number)
 
     tmi = game_instance_manager.GameInstanceManager(
         game_spawning_lock=game_spawning_lock,
-        running_speed=config_copy.running_speed,
-        run_steps_per_action=config_copy.tm_engine_step_per_action,
+        # running_speed=config_copy.running_speed,
+        # run_steps_per_action=config_copy.tm_engine_step_per_action,
         max_overall_duration_ms=config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms,
         max_minirace_duration_ms=config_copy.cutoff_rollout_if_no_vcp_passed_within_duration_ms,
         tmi_port=tmi_port,
@@ -76,6 +77,8 @@ def collector_process_fn(
         )
     # game_instance_manager.update_current_zone_idx(0, zone_centers, np.zeros(3))
 
+    zone_centers = get_vcp_centers_from_file(trajectory_path=base_dir / "maps/nord1.npy", config=config_copy)
+
     time_since_last_queue_push = time.perf_counter()
     for loop_number in count(1):
         importlib.reload(config_copy)
@@ -94,8 +97,8 @@ def collector_process_fn(
         #   GET NEXT MAP FROM CYCLE
         # ===============================================
         next_map_tuple = next(map_cycle_iter)
-        if next_map_tuple[2] != zone_centers_filename:
-            zone_centers = load_next_map_zone_centers(next_map_tuple[2], base_dir)
+        # if next_map_tuple[2] != zone_centers_filename:
+        #     zone_centers = load_next_map_zone_centers(next_map_tuple[2], base_dir)
         map_name, map_path, zone_centers_filename, is_explo, fill_buffer = next_map_tuple
         map_status = "trained" if map_name in set_maps_trained else "blind"
 
@@ -120,7 +123,7 @@ def collector_process_fn(
         rollout_start_time = time.perf_counter()
         rollout_results, end_race_stats = tmi.rollout(
             exploration_policy=inferer.get_exploration_action,
-            map_path=map_path,
+            # map_path=map_path,
             zone_centers=zone_centers,
             update_network=update_network,
         )

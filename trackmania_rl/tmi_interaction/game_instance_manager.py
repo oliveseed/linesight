@@ -3,8 +3,6 @@ Vehicle instance manager for BNG rollouts.
 
 One collector process owns one VehicleInterface (one vehicle). After the
 interface is connected, the game is assumed ready — no window/UI/map handling.
-Screenshots are omitted (blank placeholder frames) so the IQN architecture can
-stay unchanged and vision can be re-enabled later.
 """
 
 import subprocess
@@ -33,15 +31,15 @@ class GameInstanceManager:
     def __init__(
         self,
         game_spawning_lock,
-        running_speed=1,
-        run_steps_per_action=1,
+        # running_speed=1,
+        # run_steps_per_action=1,
         max_overall_duration_ms=2000,
         max_minirace_duration_ms=2000,
         tmi_port=None,
     ):
         self.iface = None
-        self.running_speed = running_speed
-        self.run_steps_per_action = run_steps_per_action
+        # self.running_speed = running_speed
+        # self.run_steps_per_action = run_steps_per_action
         self.max_overall_duration_ms = max_overall_duration_ms
         self.max_minirace_duration_ms = max_minirace_duration_ms
         self.tmi_port = tmi_port
@@ -276,12 +274,12 @@ class GameInstanceManager:
     def rollout(
         self,
         exploration_policy: Callable,
-        map_path: str,
+        # map_path: str,
         zone_centers: npt.NDArray,
         update_network: Callable,
         on_state: Callable | None = None,
     ):
-        zone_centers = get_vcp_centers_from_file(trajectory_path=None, config=config_copy)
+        # zone_centers = get_vcp_centers_from_file(trajectory_path=None, config=config_copy)
         finish_idx = len(zone_centers) - 1 - config_copy.n_zone_centers_extrapolate_after_end_of_map
         first_zone_idx = config_copy.n_zone_centers_extrapolate_before_start_of_map
         vcp = make_virtual_checkpoints(zone_centers, finish_idx)
@@ -340,15 +338,17 @@ class GameInstanceManager:
             # self.iface.reset()
             self._reset_to_zone(zone_centers, start_zone_idx)
             self.iface.step_complete()
+            print(f"[NEW ROLLOUT] Vehicle {self.tmi_port} reset to zone {current_zone_idx}")
 
             # TODO: fix the reset bug to avoid having to do this
-            _ = self.iface.get_state()
+            _state = self.iface.get_state()
             self.iface.step_complete()
+            print("initial state", _state)
 
             state = self.iface.get_state()
             race_time_ms = int(round(float(state["sim_time"]) * 1000))
 
-            # print("initial state", state)
+            print("initial state 2", state)
 
             this_rollout_is_finished = False
             while not this_rollout_is_finished:
@@ -395,8 +395,6 @@ class GameInstanceManager:
 
                 # frame = self._blank_frame()
                 frame = self.iface.get_visual_input(vis_type="color")
-                # print(frame)
-                # TODO: check if first frame of rollout is black
 
                 # Finished the race (reached final real VCP).
                 if current_zone_idx >= finish_idx:
@@ -419,6 +417,7 @@ class GameInstanceManager:
                     rollout_results["tires_skid"].append(max(state["slips"]))
                     rollout_results["wheels_off_track"].append(sum(wheels_off_track))
                     this_rollout_is_finished = True
+                    print(f"[TRUNCATION] vehicle {self.tmi_port} reached the finish")
                     break
 
                 # Failed to finish in time / no progress.
@@ -426,7 +425,21 @@ class GameInstanceManager:
                     end_race_stats["race_finished"] = False
                     end_race_stats["race_time"] = config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms
                     end_race_stats["race_time_for_ratio"] = max(race_time_ms, 1)
+                    rollout_results["damages"][-1] += 1000
                     this_rollout_is_finished = True
+                    print(f"[TRUNCATION] vehicle {self.tmi_port} timed out at zone {current_zone_idx}")
+                    break
+
+                # Vehicle got too damaged
+                if state["damage_overall"] >= config_copy.max_damage_ceiling:
+                # if sum(1 for damage in rollout_results["damages"] if damage >= config_copy.max_damage_ceiling) >= config_copy.temporal_mini_race_duration_actions:
+                    # print("max damage exceeded and timeout reached")
+                    end_race_stats["race_finished"] = False
+                    end_race_stats["race_time"] = config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms
+                    end_race_stats["race_time_for_ratio"] = max(race_time_ms, 1)
+                    rollout_results["damages"][-1] = state["damage_overall"] # overwrite last actual damage level
+                    this_rollout_is_finished = True
+                    print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
                     break
 
                 pc_policy = time.perf_counter_ns()
@@ -469,28 +482,18 @@ class GameInstanceManager:
                         action_was_greedy=action_was_greedy,
                     )
 
-                # Vehicle got too damaged
-                # if state["damage_overall"] >= config_copy.max_damage_ceiling:
-                if sum(1 for damage in rollout_results["damages"] if damage >= config_copy.max_damage_ceiling) >= config_copy.temporal_mini_race_duration_actions:
-                    print("max damage exceeded and timeout reached")
-                    end_race_stats["race_finished"] = False
-                    end_race_stats["race_time"] = config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms
-                    end_race_stats["race_time_for_ratio"] = max(race_time_ms, 1)
-                    this_rollout_is_finished = True
-                    break
-
                 pc_input = time.perf_counter_ns()
+                end_race_stats["instrumentation__request_inputs_and_speed"] += time.perf_counter_ns() - pc_input
+
                 self.request_inputs(action_idx)
-                # # Apply the same action for run_steps_per_action physics ticks.
-                # for _ in range(self.run_steps_per_action):
                 self.iface.step_complete()
                 state = self.iface.get_state()
-                end_race_stats["instrumentation__request_inputs_and_speed"] += time.perf_counter_ns() - pc_input
 
                 race_time_ms = int(round(float(state["sim_time"]) * 1000))
                 n_th_action_we_compute += 1
 
                 # print("state", state)
+
             # print("time", race_time_ms, last_progress_improvement_ms, self.max_minirace_duration_ms)
             # print("rollout", rollout_results['current_zone_idx'], rollout_results['furthest_zone_idx'], rollout_results['actions'])
             # print("furthest vcp reached", rollout_results['furthest_zone_idx'])
@@ -515,7 +518,7 @@ class GameInstanceManager:
                 end_race_stats["value_starting_frame"] = 0.0
                 end_race_stats["q_value_0_starting_frame"] = 0.0
 
-        except (ConnectionError, OSError, TimeoutError) as err:
+        except Exception as err:#(ConnectionError, OSError, TimeoutError) as err:
             print("Cutoff rollout due to vehicle interface error:", err)
             end_race_stats["tmi_protection_cutoff"] = True
             end_race_stats["race_finished"] = False

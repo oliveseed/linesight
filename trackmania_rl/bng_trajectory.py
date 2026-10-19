@@ -99,7 +99,8 @@ def get_vcp_centers_from_file(trajectory_path: Path | str | None = None, config 
     """Load a ``.npy`` player trajectory, resample it, and extrapolate its ends."""
 
     if trajectory_path is None:
-        trajectory_path = Path(__file__).resolve().parents[1] / "nord1.npy"
+        # trajectory_path = Path(__file__).resolve().parents[1] / "maps/nord1.npy"
+        raise Exception
 
     required_after_finish = (config.n_zone_centers_in_inputs - 1) * config.one_every_n_zone_centers_in_inputs
     if config.n_zone_centers_extrapolate_after_end_of_map < required_after_finish:

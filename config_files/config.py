@@ -28,12 +28,12 @@ from config_files.user_config import *
 W_downsized = 160
 H_downsized = 120
 
-run_name = "test_crap_19"
-running_speed = 80
+run_name = "test_crap_22"
+# running_speed = 80
 
-tm_engine_step_per_action = 5
-ms_per_tm_engine_step = 10
-ms_per_action = ms_per_tm_engine_step * tm_engine_step_per_action
+tm_engine_step_per_action = 100
+ms_per_tm_engine_step = 0.5
+ms_per_action = 50 # ms_per_tm_engine_step * tm_engine_step_per_action
 n_zone_centers_in_inputs = 40
 one_every_n_zone_centers_in_inputs = 20
 n_zone_centers_extrapolate_after_end_of_map = 1000
@@ -84,7 +84,7 @@ n_steps = 3
 constant_reward_per_ms = -6 / 5000
 reward_per_m_advanced_along_centerline = 5 / 500
 max_damage_ceiling = 1000
-crashed_penalty = -10
+crashed_penalty = -1
 
 float_input_dim = 27 + 3 * n_zone_centers_in_inputs + 4 * n_prev_actions_in_inputs + 4 * n_contact_material_physics_behavior_types + 1
 float_hidden_dim = 256
@@ -94,7 +94,7 @@ iqn_embedding_dimension = 64
 iqn_n = 8  # must be an even number because we sample tau symmetrically around 0.5
 iqn_k = 32  # must be an even number because we sample tau symmetrically around 0.5
 iqn_kappa = 5e-3
-use_ddqn = True
+use_ddqn = False
 
 prio_alpha = np.float32(0)  # Rainbow-IQN paper: 0.2, Rainbow paper: 0.5, PER paper 0.6
 prio_epsilon = np.float32(2e-3)  # Defaults to 10^-6 in stable-baselines
@@ -170,7 +170,7 @@ use_jit = True
 # gpu_collectors_count is the number of Trackmania instances that will be launched in parallel.
 # It is recommended that users adjust this number depending on the performance of their machine.
 # We recommend trying different values and finding the one that maximises the number of batches done per unit of time.
-gpu_collectors_count = 1
+gpu_collectors_count = 6
 
 send_shared_network_every_n_batches = 10
 update_inference_network_every_n_actions = 20
