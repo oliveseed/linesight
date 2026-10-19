@@ -83,10 +83,17 @@ def soft_copy_param(target_link, source_link, tau):
             assert False, "Soft scalar update should not happen"
 
 
-def custom_weight_decay(target_link, decay_factor):
-    target_dict = target_link.state_dict()
-    for k, target_value in target_dict.items():
-        target_value.mul_(decay_factor)
+def custom_weight_decay(module, decay_factor):
+    """Multiply every weight parameter of `module` by `decay_factor`.
+
+    Parameters with ndim <= 1 (biases and other 1D parameters) are skipped so that
+    weight decay is only applied to real weight matrices. The float-input
+    normalization tensors (float_inputs_mean/std) are plain attributes, not
+    parameters, and are therefore never decayed either.
+    """
+    for target_value in module.parameters():
+        if target_value.ndim > 1:
+            target_value.mul_(decay_factor)
 
 
 def from_exponential_schedule(schedule: List[Tuple[int, float]], current_step: int):
@@ -182,15 +189,28 @@ def save_run(
 
 def save_checkpoint(
     checkpoint_dir: Path,
-    online_network: torch.nn.Module,
-    target_network: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
+    policy: torch.nn.Module,
+    critic1: torch.nn.Module,
+    critic2: torch.nn.Module,
+    target_policy: torch.nn.Module,
+    target_critic1: torch.nn.Module,
+    target_critic2: torch.nn.Module,
+    policy_optimizer: torch.optim.Optimizer,
+    critic_optimizer: torch.optim.Optimizer,
+    log_alpha: torch.Tensor,
+    alpha_optimizer: torch.optim.Optimizer,
     scaler: torch.cuda.amp.GradScaler,
 ):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(online_network.state_dict(), checkpoint_dir / "weights1.torch")
-    torch.save(target_network.state_dict(), checkpoint_dir / "weights2.torch")
-    torch.save(optimizer.state_dict(), checkpoint_dir / "optimizer1.torch")
+    torch.save(policy.state_dict(), checkpoint_dir / "policy.torch")
+    torch.save(critic1.state_dict(), checkpoint_dir / "critic1.torch")
+    torch.save(critic2.state_dict(), checkpoint_dir / "critic2.torch")
+    torch.save(target_policy.state_dict(), checkpoint_dir / "target_policy.torch")
+    torch.save(target_critic1.state_dict(), checkpoint_dir / "target_critic1.torch")
+    torch.save(target_critic2.state_dict(), checkpoint_dir / "target_critic2.torch")
+    torch.save(policy_optimizer.state_dict(), checkpoint_dir / "policy_optimizer.torch")
+    torch.save(critic_optimizer.state_dict(), checkpoint_dir / "critic_optimizer.torch")
+    torch.save({"log_alpha": log_alpha, "alpha_optimizer": alpha_optimizer.state_dict()}, checkpoint_dir / "alpha.torch")
     torch.save(scaler.state_dict(), checkpoint_dir / "scaler.torch")
 
 def set_random_seed(seed: int):

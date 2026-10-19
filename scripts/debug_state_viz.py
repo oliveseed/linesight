@@ -74,7 +74,7 @@ STATE_PAGE = """<!DOCTYPE html>
         <tbody id="tbody-main"></tbody>
       </table>
       <details open>
-        <summary>Zone centers &mdash; next 40 VCPs in car frame (indices 62..181)</summary>
+        <summary>Zone centers &mdash; next 40 VCPs in car frame (indices 57..176)</summary>
         <table>
           <thead><tr><th>#</th><th>feature</th><th>value</th></tr></thead>
           <tbody id="tbody-zones"></tbody>
@@ -244,7 +244,7 @@ def build_float_labels(config):
     """Name every element of the float feature vector, mirroring _build_float_inputs."""
     labels = ["temporal_mini_race (placeholder)"]
     for k in range(config.n_prev_actions_in_inputs):
-        for name in ("increase_throttle", "increase_brake", "left", "right"):
+        for name in ("steer", "throttle", "brake"):
             labels.append(f"prev_action[{k}].{name}")
     labels += ["throttle", "brake", "steering", "damage_overall"]
     labels += ["slip_fl", "slip_fr", "slip_rl", "slip_rr"]
@@ -285,7 +285,7 @@ def build_payload(config, step):
             "dist_m": round(float(step["distance_since_track_begin"]), 2),
             "speed_mps": round(float(np.linalg.norm(velocity)), 2),
             "pos": [round(float(v), 2) for v in state["position"]],
-            "action": int(step["action_idx"]),
+            "action": [round(float(v), 3) for v in np.asarray(step["action_idx"]).ravel()[:3]],
             "greedy": bool(step["action_was_greedy"]),
         },
         "floats": [round(float(v), 5) for v in step["floats"]],
@@ -294,10 +294,10 @@ def build_payload(config, step):
 
 
 def make_fixed_forward_policy(config):
+    action = np.asarray(config.default_action, dtype=np.float32)
+
     def policy(frame, floats):
-        q_values = np.zeros(len(config.inputs), dtype=np.float32)
-        q_values[config.action_forward_idx] = 1.0
-        return config.action_forward_idx, True, 1.0, q_values
+        return action, True, 1.0, action
 
     return policy
 
@@ -323,7 +323,6 @@ def run_state_stream(broadcaster, config, port):
         try:
             manager.rollout(
                 exploration_policy=policy,
-                map_path="",
                 zone_centers=None,
                 update_network=None,
                 on_state=on_state,

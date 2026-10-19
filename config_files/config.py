@@ -21,14 +21,13 @@ has a computer with 16GB RAM.
 """
 from itertools import repeat
 
-from config_files.inputs_list import *
 from config_files.state_normalization import *
 from config_files.user_config import *
 
 W_downsized = 160
 H_downsized = 120
 
-run_name = "test_crap_22"
+run_name = "qrsac_test_1"
 # running_speed = 80
 
 tm_engine_step_per_action = 100
@@ -53,18 +52,12 @@ margin_to_announce_finish_meters = 700
 
 global_schedule_speed = 1.0
 
-epsilon_schedule = [
-    (0, 1),
-    (50_000, 1),
-    (300_000, 0.1),
-    (3_000_000 * global_schedule_speed, 0.03),
-]
-epsilon_boltzmann_schedule = [
-    (0, 0.15),
-    (3_000_000 * global_schedule_speed, 0.03),
-]
-tau_epsilon_boltzmann = 0.01
-discard_non_greedy_actions_in_nsteps = True
+# With a stochastic policy there is no argmax action; sampled actions are always "greedy" policy
+# actions, so the n-step truncation rule used with IQN epsilon-greedy exploration is disabled.
+# Keep the mini-race / random reinterpreted horizon logic in buffer_collate_function unchanged for now.
+# >>> Recommended follow-up (not implemented in this change): consider removing `discard_non_greedy_actions_in_nsteps`
+# and re-tuning `oversample_long_term_steps` for on-policy-style n-step data.
+discard_non_greedy_actions_in_nsteps = False
 buffer_test_ratio = 0.05
 
 engineered_speedslide_reward_schedule = [
@@ -86,16 +79,40 @@ reward_per_m_advanced_along_centerline = 5 / 500
 max_damage_ceiling = 1000
 crashed_penalty = -1
 
-float_input_dim = 27 + 3 * n_zone_centers_in_inputs + 4 * n_prev_actions_in_inputs + 4 * n_contact_material_physics_behavior_types + 1
+float_input_dim = (
+    1  # temporal mini-race counter (first input)
+    + 3 * n_prev_actions_in_inputs  # previous (steer, throttle, brake) triplets
+    + 4  # throttle, brake, steering, damage
+    + 4  # per-wheel slips
+    + 4  # per-wheel downforces
+    + 4  # gearbox state, gear, rpm, counter
+    + 4 * n_contact_material_physics_behavior_types  # wheel contact material types
+    + 3 + 3 + 3  # angular velocity, linear velocity, map-up vector (car frame)
+    + 3 * n_zone_centers_in_inputs  # vcp coordinates in car frame
+    + 2  # finish distance, is_freewheeling
+)
 float_hidden_dim = 256
 conv_head_output_dim = 5632
 dense_hidden_dimension = 1024
-iqn_embedding_dimension = 64
-iqn_n = 8  # must be an even number because we sample tau symmetrically around 0.5
-iqn_k = 32  # must be an even number because we sample tau symmetrically around 0.5
-iqn_kappa = 5e-3
-use_ddqn = False
+quantile_embedding_dimension = 64
+n_quantiles = 32  # number of quantiles per critic prediction (N in QRSAC/DSAC)
+quantile_huber_kappa = 1.0  # huber threshold of the quantile (pinball) loss
 
+# Continuous action layout: [steer ∈ [-1, 1], throttle ∈ [0, 1], brake ∈ [0, 1]]
+# NOTE: the BeamNG Lua-side SET_ACTION handler must be updated to decode <I3f (3 floats)
+# before training with continuous actions can take place.
+default_action = (0.0, 1.0, 0.0)  # steer 0, full throttle, no brake (used when no previous action exists)
+
+# ---- QRSAC hyperparameters ----
+# Policy optimization uses the base lr_schedule below, scaled by these ratios.
+policy_lr_ratio = 1.0
+critic_lr_ratio = 1.0
+alpha_lr_ratio = 1.0
+alpha_initial = 0.1  # initial entropy coefficient
+target_entropy = -3.0  # standard SAC heuristic: -(action_dim)
+reward_scale = 1.0  # multiplies rewards in QRSAC targets (tune if quantile targets boil/overflow)
+
+# ---- PER (prioritized experience replay) ----
 prio_alpha = np.float32(0)  # Rainbow-IQN paper: 0.2, Rainbow paper: 0.5, PER paper 0.6
 prio_epsilon = np.float32(2e-3)  # Defaults to 10^-6 in stable-baselines
 prio_beta = np.float32(1)
@@ -130,7 +147,7 @@ gamma_schedule = [
 
 batch_size = 512
 weight_decay_lr_ratio = 1 / 50
-adam_epsilon = 1e-4
+adam_epsilon = 1e-8
 adam_beta1 = 0.9
 adam_beta2 = 0.999
 
@@ -140,7 +157,6 @@ additional_transition_after_reset = 1_600_000
 last_layer_reset_factor = 0.8  # 0 : full reset, 1 : nothing happens
 overall_reset_mul_factor = 0.01  # 0 : nothing happens ; 1 : full reset
 
-clip_grad_value = 1000
 clip_grad_norm = 30
 
 number_memories_trained_on_between_target_network_updates = 2048
@@ -174,8 +190,6 @@ gpu_collectors_count = 6
 
 send_shared_network_every_n_batches = 10
 update_inference_network_every_n_actions = 20
-
-target_self_loss_clamp_ratio = 4
 
 final_speed_reward_as_if_duration_s = 0
 final_speed_reward_per_m_per_s = reward_per_m_advanced_along_centerline * final_speed_reward_as_if_duration_s

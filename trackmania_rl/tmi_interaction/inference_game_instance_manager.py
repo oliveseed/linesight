@@ -89,20 +89,12 @@ class GameInstanceManager:
                 cwd=str(self._base_dir),
             )
 
-    def request_inputs(self, action_idx: int):
-        action = config_copy.inputs[action_idx]
+    def request_inputs(self, action: npt.NDArray):
+        """Send a continuous (steer, throttle, brake) action to the vehicle."""
         self.iface.send_action(
-            left=bool(action["left"]),
-            right=bool(action["right"]),
-            center=bool(action["center"]),
-            throttle=bool(action["increase_throttle"]),
-            brake=bool(action["increase_brake"]),
-            reset_throttle=bool(action["reset_throttle"]),
-            reset_brake=bool(action["reset_brake"]),
-            # throttle=bool(action["accelerate"]),
-            # brake=bool(action["brake"]),
-            # reset_throttle=False,
-            # reset_brake=False,
+            steer=float(np.clip(action[0], -1.0, 1.0)),
+            throttle=float(np.clip(action[1], 0.0, 1.0)),
+            brake=float(np.clip(action[2], 0.0, 1.0)),
         )
 
     def _blank_frame(self) -> npt.NDArray:
@@ -138,9 +130,10 @@ class GameInstanceManager:
     ) -> npt.NDArray:
         """Build the float feature vector.
 
-        Layout mirrors the original Trackmania features so buffer_management
-        hard-coded indices (velocity @ 56:59, current VCP @ 62:65, …) stay valid.
-        Missing sensors are filled with placeholders for easy later restoration.
+        Layout (continuous-action QRSAC version), mirrors game_instance_manager:
+            [0]  mini-race counter | [1..15] prev (steer,throttle,brake) x5 | [16..47] gear/wheels
+            [48..50] angvel car | [51..53] velocity car | [54..56] map-up car | [57..176] 40 vcp
+            [177] finish distance | [178] is_freewheeling
         """
         position = np.asarray(state["position"], dtype=np.float32)
         velocity = np.asarray(state["velocity"], dtype=np.float32)
@@ -165,9 +158,9 @@ class GameInstanceManager:
         state_car_velocity_in_car_reference_system = R_inv.dot(velocity)
         state_car_angular_velocity_in_car_reference_system = R_inv.dot(angular_velocity)
 
-        # list containing n_prev_actions_in_inputs dicts, each being an action from the inputs_list
+        # list containing n_prev_actions_in_inputs np arrays, each being a (steer, throttle, brake) action.
         previous_actions = [
-            config_copy.inputs[actions[k] if k >= 0 else config_copy.action_forward_idx]
+            actions[k] if k >= 0 and k < len(actions) and isinstance(actions[k], np.ndarray) else config_copy.default_action
             for k in range(len(actions) - config_copy.n_prev_actions_in_inputs, len(actions))
         ]
 
@@ -236,9 +229,9 @@ class GameInstanceManager:
                 0,  # temporal mini-race feature, filled later in buffer_collate_function
                 np.array(
                     [
-                        previous_action[input_str]
+                        previous_action[input_idx]
                         for previous_action in previous_actions
-                        for input_str in ["increase_throttle", "increase_brake", "left", "right"]
+                        for input_idx in range(3)  # steer, throttle, brake
                     ],
                     dtype=np.float32,
                 ),
@@ -375,13 +368,13 @@ class GameInstanceManager:
                 #     break
 
                 (
-                    action_idx,
+                    action,
                     action_was_greedy,
                     q_value,
-                    q_values,
+                    _,
                 ) = exploration_policy(frame, floats)
 
-                actions.append(action_idx)
+                actions.append(action)
 
                 # Vehicle got too damaged
                 # if state["damage_overall"] >= config_copy.max_damage_ceiling:
@@ -389,7 +382,7 @@ class GameInstanceManager:
                 #     this_rollout_is_finished = True
                 #     break
 
-                self.request_inputs(action_idx)
+                self.request_inputs(action)
                 # # Apply the same action for run_steps_per_action physics ticks.
                 # for _ in range(self.run_steps_per_action):
                 self.iface.step_complete()

@@ -126,9 +126,18 @@ class VehicleInterface:
             struct.pack("<I6f", Message.RESET_TELEPORT, *pos, *rot)
         )
 
-    def send_action(self, left, right, center, throttle, brake, reset_throttle, reset_brake):
+    def send_action(self, steer: float, throttle: float, brake: float):
+        """Send a continuous action to the vehicle.
+
+        steer    ∈ [-1, 1]
+        throttle ∈ [0, 1]
+        brake    ∈ [0, 1]
+
+        NOTE: the BeamNG Lua-side handler for Message.SET_ACTION must be updated separately to
+        decode '<I3f' (3 floats) instead of the legacy '<I7B' (7 booleans).
+        """
         self.sock.sendall(
-            struct.pack("<I7B", Message.SET_ACTION, left, right, center, throttle, brake, reset_throttle, reset_brake)
+            struct.pack("<I3f", Message.SET_ACTION, steer, throttle, brake)
         )
 
     def step_complete(self):

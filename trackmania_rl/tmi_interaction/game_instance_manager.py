@@ -89,20 +89,15 @@ class GameInstanceManager:
                 cwd=str(self._base_dir),
             )
 
-    def request_inputs(self, action_idx: int):
-        action = config_copy.inputs[action_idx]
+    def request_inputs(self, action: npt.NDArray):
+        """Send a continuous (steer, throttle, brake) action to the vehicle.
+
+        The Lua side decodes '<I3f' — see bng_interface.send_action + config.py note.
+        """
         self.iface.send_action(
-            left=bool(action["left"]),
-            right=bool(action["right"]),
-            center=bool(action["center"]),
-            throttle=bool(action["increase_throttle"]),
-            brake=bool(action["increase_brake"]),
-            reset_throttle=bool(action["reset_throttle"]),
-            reset_brake=bool(action["reset_brake"]),
-            # throttle=bool(action["accelerate"]),
-            # brake=bool(action["brake"]),
-            # reset_throttle=False,
-            # reset_brake=False,
+            steer=float(np.clip(action[0], -1.0, 1.0)),
+            throttle=float(np.clip(action[1], 0.0, 1.0)),
+            brake=float(np.clip(action[2], 0.0, 1.0)),
         )
 
     def _blank_frame(self) -> npt.NDArray:
@@ -138,9 +133,11 @@ class GameInstanceManager:
     ) -> npt.NDArray:
         """Build the float feature vector.
 
-        Layout mirrors the original Trackmania features so buffer_management
-        hard-coded indices (velocity @ 56:59, current VCP @ 62:65, …) stay valid.
-        Missing sensors are filled with placeholders for easy later restoration.
+        Layout (continuous-action QRSAC version):
+            [0]  mini-race counter | [1..15] prev (steer,throttle,brake) x5 | [16..47] gear/wheels
+            [48..50] angvel car | [51..53] velocity car | [54..56] map-up car | [57..176] 40 vcp
+            [177] finish distance | [178] is_freewheeling
+        buffer_management hard-coded indices use the same layout.
         """
         position = np.asarray(state["position"], dtype=np.float32)
         velocity = np.asarray(state["velocity"], dtype=np.float32)
@@ -165,9 +162,10 @@ class GameInstanceManager:
         state_car_velocity_in_car_reference_system = R_inv.dot(velocity)
         state_car_angular_velocity_in_car_reference_system = R_inv.dot(angular_velocity)
 
-        # list containing n_prev_actions_in_inputs dicts, each being an action from the inputs_list
+        # list containing n_prev_actions_in_inputs np arrays, each being a (steer, throttle, brake) action.
+        # The last (terminal) frame of a rollout stores np.nan instead of an action vector.
         previous_actions = [
-            config_copy.inputs[rollout_results["actions"][k] if k >= 0 else config_copy.action_forward_idx]
+            rollout_results["actions"][k] if k >= 0 and isinstance(rollout_results["actions"][k], np.ndarray) else config_copy.default_action
             for k in range(len(rollout_results["actions"]) - config_copy.n_prev_actions_in_inputs, len(rollout_results["actions"]))
         ]
         
@@ -233,9 +231,9 @@ class GameInstanceManager:
                 0,  # temporal mini-race feature, filled later in buffer_collate_function
                 np.array(
                     [
-                        previous_action[input_str]
+                        previous_action[input_idx]
                         for previous_action in previous_actions
-                        for input_str in ["increase_throttle", "increase_brake", "left", "right"]
+                        for input_idx in range(3)  # steer, throttle, brake
                     ],
                     dtype=np.float32,
                 ),
@@ -444,26 +442,25 @@ class GameInstanceManager:
 
                 pc_policy = time.perf_counter_ns()
                 (
-                    action_idx,
+                    action,
                     action_was_greedy,
                     q_value,
-                    q_values,
+                    _,
                 ) = exploration_policy(frame, floats)
                 end_race_stats["instrumentation__exploration_policy"] += time.perf_counter_ns() - pc_policy
 
                 if n_th_action_we_compute == 0:
                     end_race_stats["value_starting_frame"] = q_value
-                    for i, val in enumerate(np.nditer(q_values)):
-                        end_race_stats[f"q_value_{i}_starting_frame"] = val
+                    for i, val in enumerate(action):
+                        end_race_stats[f"action_{i}_starting_frame"] = val
 
                 rollout_results["current_zone_idx"].append(current_zone_idx)
                 rollout_results["frames"].append(frame)
-                rollout_results["input_w"].append(config_copy.inputs[action_idx]["increase_throttle"])
-                # rollout_results["input_w"].append(config_copy.inputs[action_idx]["accelerate"])
-                rollout_results["actions"].append(action_idx)
+                rollout_results["input_w"].append(float(action[1]))  # throttle value
+                rollout_results["actions"].append(action.astype(np.float32))
                 rollout_results["action_was_greedy"].append(action_was_greedy)
                 rollout_results["car_gear_and_wheels"].append(np.zeros(16, dtype=np.float32))  # placeholder
-                rollout_results["q_values"].append(q_values)
+                rollout_results["q_values"].append(q_value)
                 rollout_results["state_float"].append(floats)
                 rollout_results["meters_advanced_along_centerline"].append(distance_since_track_begin)
                 rollout_results["damages"].append(state["damage_overall"])
@@ -478,14 +475,14 @@ class GameInstanceManager:
                         current_zone_idx=current_zone_idx,
                         distance_since_track_begin=distance_since_track_begin,
                         race_time_ms=race_time_ms,
-                        action_idx=action_idx,
+                        action_idx=action,
                         action_was_greedy=action_was_greedy,
                     )
 
                 pc_input = time.perf_counter_ns()
                 end_race_stats["instrumentation__request_inputs_and_speed"] += time.perf_counter_ns() - pc_input
 
-                self.request_inputs(action_idx)
+                self.request_inputs(action)
                 self.iface.step_complete()
                 state = self.iface.get_state()
 

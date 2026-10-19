@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from config_files import config_copy
-from trackmania_rl.agents import iqn
+from trackmania_rl.agents import qsac
 from trackmania_rl.bng_trajectory import get_vcp_centers_from_file
 from trackmania_rl.utilities import set_random_seed
 
@@ -36,16 +36,13 @@ def inference_process_fn(
         tmi_port=tmi_port,
     )
 
-    inference_network, _ = iqn.make_untrained_iqn_network(config_copy.use_jit, is_inference=True)
+    inference_network, _ = qsac.make_policy(config_copy.use_jit, is_inference=True)
     try:
-        inference_network.load_state_dict(torch.load(f=save_dir / "weights1.torch", weights_only=False))
+        inference_network.load_state_dict(torch.load(f=save_dir / "policy.torch", weights_only=False))
     except Exception as e:
         print("Worker could not load weights, exception:", e)
 
-    inferer = iqn.Inferer(inference_network, config_copy.iqn_k, config_copy.tau_epsilon_boltzmann)
-    inferer.epsilon = 0.0
-    inferer.epsilon_boltzmann = 0.0
-    inferer.tau_epsilon_boltzmann = config_copy.tau_epsilon_boltzmann
+    inferer = qsac.Inferer(inference_network)
     inferer.is_explo = False
 
     zone_centers = get_vcp_centers_from_file(trajectory_path=base_dir / "maps" / "nord1.npy", config=config_copy)
@@ -54,9 +51,10 @@ def inference_process_fn(
     # Warmup pytorch
     # ========================================================
     for _ in range(5):
-        inferer.infer_network(
+        inferer.infer_actions(
             np.random.randint(low=0, high=255, size=(1, config_copy.H_downsized, config_copy.W_downsized), dtype=np.uint8),
             np.random.rand(config_copy.float_input_dim).astype(np.float32),
+            deterministic=True,
         )
 
     for loop_number in count(1):

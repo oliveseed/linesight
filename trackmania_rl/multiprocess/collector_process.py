@@ -12,8 +12,7 @@ import torch
 from torch import multiprocessing as mp
 
 from config_files import config_copy
-from trackmania_rl import utilities
-from trackmania_rl.agents import iqn as iqn
+from trackmania_rl.agents import qsac
 from trackmania_rl.utilities import set_random_seed
 
 
@@ -28,8 +27,8 @@ def collector_process_fn(
     tmi_port: int,
     process_number: int,
 ):
-    from trackmania_rl.map_loader import analyze_map_cycle, load_next_map_zone_centers
     from trackmania_rl.bng_trajectory import get_vcp_centers_from_file
+    from trackmania_rl.map_loader import analyze_map_cycle
     from trackmania_rl.tmi_interaction import game_instance_manager
 
     set_random_seed(process_number)
@@ -43,13 +42,15 @@ def collector_process_fn(
         tmi_port=tmi_port,
     )
 
-    inference_network, uncompiled_inference_network = iqn.make_untrained_iqn_network(config_copy.use_jit, is_inference=True)
+    inference_network, uncompiled_inference_network = qsac.make_policy(config_copy.use_jit, is_inference=True)
+    critic1_inference, _ = qsac.make_critic(config_copy.use_jit)
     try:
-        inference_network.load_state_dict(torch.load(f=save_dir / "weights1.torch", weights_only=False))
+        inference_network.load_state_dict(torch.load(f=save_dir / "policy.torch", weights_only=False))
+        critic1_inference.load_state_dict(torch.load(f=save_dir / "critic1.torch", weights_only=False))
     except Exception as e:
         print("Worker could not load weights, exception:", e)
 
-    inferer = iqn.Inferer(inference_network, config_copy.iqn_k, config_copy.tau_epsilon_boltzmann)
+    inferer = qsac.Inferer(inference_network, critic=critic1_inference)
 
     def update_network():
         # Update weights of the inference network
@@ -65,13 +66,12 @@ def collector_process_fn(
     set_maps_trained, set_maps_blind = analyze_map_cycle(config_copy.map_cycle)
     map_cycle_iter = cycle(chain(*config_copy.map_cycle))
 
-    zone_centers_filename = None
 
     # ========================================================
     # Warmup pytorch and numba
     # ========================================================
     for _ in range(5):
-        inferer.infer_network(
+        inferer.infer_actions(
             np.random.randint(low=0, high=255, size=(1, config_copy.H_downsized, config_copy.W_downsized), dtype=np.uint8),
             np.random.rand(config_copy.float_input_dim).astype(np.float32),
         )
@@ -90,7 +90,7 @@ def collector_process_fn(
         # ===============================================
         if str(config_copy.map_cycle) != map_cycle_str:
             map_cycle_str = str(config_copy.map_cycle)
-            set_maps_trained, set_maps_blind = analyze_map_cycle(config_copy.map_cycle)
+            set_maps_trained, _set_maps_blind = analyze_map_cycle(config_copy.map_cycle)
             map_cycle_iter = cycle(chain(*config_copy.map_cycle))
 
         # ===============================================
@@ -99,12 +99,9 @@ def collector_process_fn(
         next_map_tuple = next(map_cycle_iter)
         # if next_map_tuple[2] != zone_centers_filename:
         #     zone_centers = load_next_map_zone_centers(next_map_tuple[2], base_dir)
-        map_name, map_path, zone_centers_filename, is_explo, fill_buffer = next_map_tuple
+        map_name, _map_path, _zone_centers_filename, is_explo, fill_buffer = next_map_tuple
         map_status = "trained" if map_name in set_maps_trained else "blind"
 
-        inferer.epsilon = utilities.from_exponential_schedule(config_copy.epsilon_schedule, shared_steps.value)
-        inferer.epsilon_boltzmann = utilities.from_exponential_schedule(config_copy.epsilon_boltzmann_schedule, shared_steps.value)
-        inferer.tau_epsilon_boltzmann = config_copy.tau_epsilon_boltzmann
         inferer.is_explo = is_explo
 
         # ===============================================
@@ -131,7 +128,7 @@ def collector_process_fn(
         rollout_duration = rollout_end_time - rollout_start_time
         rollout_results["worker_time_in_rollout_percentage"] = rollout_duration / (time.perf_counter() - time_since_last_queue_push)
         time_since_last_queue_push = time.perf_counter()
-        print("", flush=True)
+        print(flush=True)
 
         if not tmi.last_rollout_crashed:
             rollout_queue.put(

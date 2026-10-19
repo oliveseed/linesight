@@ -38,19 +38,16 @@ if __name__ == "__main__":
 
 import ctypes
 import os
-import random
 import signal
 import sys
-import time
 
-import numpy as np
 import torch
 import torch.multiprocessing as mp
 from art import tprint
 from torch.multiprocessing import Lock
 
 from config_files import config_copy
-from trackmania_rl.agents.iqn import make_untrained_iqn_network
+from trackmania_rl.agents.qsac import make_policy
 from trackmania_rl.multiprocess.collector_process import collector_process_fn
 from trackmania_rl.multiprocess.learner_process import learner_process_fn
 from trackmania_rl.utilities import set_random_seed
@@ -61,6 +58,7 @@ torch.set_num_threads(1)
 torch.set_float32_matmul_precision("high")
 random_seed = 444
 set_random_seed(random_seed)
+
 
 def signal_handler(sig, frame):
     print("Received SIGINT signal. Killing all open Trackmania instances.")
@@ -112,7 +110,7 @@ if __name__ == "__main__":
     rollout_queues = [mp.Queue(config_copy.max_rollout_queue_size) for _ in range(config_copy.gpu_collectors_count)]
     shared_network_lock = Lock()
     game_spawning_lock = Lock()
-    _, uncompiled_shared_network = make_untrained_iqn_network(jit=config_copy.use_jit, is_inference=False)
+    _, uncompiled_shared_network = make_policy(jit=config_copy.use_jit, is_inference=False)
     uncompiled_shared_network.share_memory()
 
     # Start worker process
