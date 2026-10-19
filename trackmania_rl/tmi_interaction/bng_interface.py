@@ -53,6 +53,7 @@ class Message(IntEnum):
     RESET = 1
     RESET_TELEPORT = 2
     SET_ACTION = 3
+    SET_ACTION_CONT = 4
     STEP_COMPLETE = 100
 
 class VehicleInterface:
@@ -137,7 +138,7 @@ class VehicleInterface:
         decode '<I3f' (3 floats) instead of the legacy '<I7B' (7 booleans).
         """
         self.sock.sendall(
-            struct.pack("<I3f", Message.SET_ACTION, steer, throttle, brake)
+            struct.pack("<I3f", Message.SET_ACTION_CONT, steer, throttle, brake)
         )
 
     def step_complete(self):

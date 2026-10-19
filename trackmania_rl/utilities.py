@@ -90,10 +90,14 @@ def custom_weight_decay(module, decay_factor):
     weight decay is only applied to real weight matrices. The float-input
     normalization tensors (float_inputs_mean/std) are plain attributes, not
     parameters, and are therefore never decayed either.
+
+    Runs under torch.no_grad() like an optimizer step: in-place updates on leaf
+    parameters that require grad are forbidden while autograd is tracking.
     """
-    for target_value in module.parameters():
-        if target_value.ndim > 1:
-            target_value.mul_(decay_factor)
+    with torch.no_grad():
+        for target_value in module.parameters():
+            if target_value.ndim > 1:
+                target_value.mul_(decay_factor)
 
 
 def from_exponential_schedule(schedule: List[Tuple[int, float]], current_step: int):

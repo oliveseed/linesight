@@ -157,7 +157,7 @@ additional_transition_after_reset = 1_600_000
 last_layer_reset_factor = 0.8  # 0 : full reset, 1 : nothing happens
 overall_reset_mul_factor = 0.01  # 0 : nothing happens ; 1 : full reset
 
-clip_grad_norm = 30
+clip_grad_norm = 1
 
 number_memories_trained_on_between_target_network_updates = 2048
 soft_update_tau = 0.02
