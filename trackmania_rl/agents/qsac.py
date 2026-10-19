@@ -44,13 +44,13 @@ def _make_img_head() -> torch.nn.Module:
     activation_function = torch.nn.LeakyReLU
     return torch.nn.Sequential(
         torch.nn.Conv2d(in_channels=img_head_channels[0], out_channels=img_head_channels[1], kernel_size=(4, 4), stride=2),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
         torch.nn.Conv2d(in_channels=img_head_channels[1], out_channels=img_head_channels[2], kernel_size=(4, 4), stride=2),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
         torch.nn.Conv2d(in_channels=img_head_channels[2], out_channels=img_head_channels[3], kernel_size=(3, 3), stride=2),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
         torch.nn.Conv2d(in_channels=img_head_channels[3], out_channels=img_head_channels[4], kernel_size=(3, 3), stride=1),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
         torch.nn.Flatten(),
     )
 
@@ -59,9 +59,9 @@ def _make_float_feature_extractor(float_inputs_dim: int, float_hidden_dim: int) 
     activation_function = torch.nn.LeakyReLU
     return torch.nn.Sequential(
         torch.nn.Linear(float_inputs_dim, float_hidden_dim),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
         torch.nn.Linear(float_hidden_dim, float_hidden_dim),
-        activation_function(inplace=True),
+        activation_function(inplace=False),
     )
 
 
@@ -93,12 +93,12 @@ class SACPolicy(torch.nn.Module):
         activation_function = torch.nn.LeakyReLU
         self.mu_head = torch.nn.Sequential(
             torch.nn.Linear(dense_input_dimension, dense_hidden_dimension // 2),
-            activation_function(inplace=True),
+            activation_function(inplace=False),
             torch.nn.Linear(dense_hidden_dimension // 2, action_dim),
         )
         self.log_std_head = torch.nn.Sequential(
             torch.nn.Linear(dense_input_dimension, dense_hidden_dimension // 2),
-            activation_function(inplace=True),
+            activation_function(inplace=False),
             torch.nn.Linear(dense_hidden_dimension // 2, action_dim),
         )
         self.initialize_weights()
@@ -159,7 +159,7 @@ class QuantileCritic(torch.nn.Module):
         activation_function = torch.nn.LeakyReLU
         self.base_fc = torch.nn.Sequential(
             torch.nn.Linear(dense_input_dimension + action_dim, dense_hidden_dimension // 2),
-            activation_function(inplace=True),
+            activation_function(inplace=False),
         )
         self.tau_fc = torch.nn.Sequential(
             torch.nn.Linear(quantile_embedding_dimension, dense_hidden_dimension // 2),
@@ -168,7 +168,7 @@ class QuantileCritic(torch.nn.Module):
         )
         self.merge_fc = torch.nn.Sequential(
             torch.nn.Linear(dense_hidden_dimension // 2, dense_hidden_dimension // 2),
-            activation_function(inplace=True),
+            activation_function(inplace=False),
         )
         self.last_fc = torch.nn.Linear(dense_hidden_dimension // 2, 1)
         self.initialize_weights()
