@@ -231,6 +231,7 @@ class Trainer:
 
     __slots__ = (
         "alpha_optimizer",
+        "amp_dtype",
         "batch_size",
         "critic1",
         "critic2",
@@ -261,6 +262,7 @@ class Trainer:
         scaler: torch.amp.GradScaler,
         batch_size: int,
         n_quantiles: int,
+        amp_dtype: torch.dtype = torch.float16,
     ):
         self.policy = policy
         self.target_policy = target_policy
@@ -275,6 +277,7 @@ class Trainer:
         self.scaler = scaler
         self.batch_size = batch_size
         self.n_quantiles = n_quantiles
+        self.amp_dtype = amp_dtype
         self.diagnostics: defaultdict[str, typing.Any] = defaultdict(float)
 
     @property
@@ -338,7 +341,7 @@ class Trainer:
         self.critic_optimizer.zero_grad(set_to_none=True)
         self.alpha_optimizer.zero_grad(set_to_none=True)
 
-        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+        with torch.amp.autocast(device_type="cuda", dtype=self.amp_dtype):
             batch, batch_info = buffer.sample(self.batch_size, return_info=True)
             (
                 state_img_tensor,
@@ -381,7 +384,35 @@ class Trainer:
                 critic_loss = (z1_loss + z2_loss).mean()
 
             # ===============================================
-            #   POLICY + ALPHA UPDATE
+            #   OPTIMIZER STEPS
+            # ===============================================
+            #
+            # Order of operations matters when a single GradScaler drives the three optimizers within one
+            # autocast region: backpropagating policy_loss / alpha_loss flows through critic1/critic2, so if the
+            # critic optimizer stepped only after all backpropagations, policy gradients would leak into the
+            # critic parameters and get applied by the critic step on this same batch. That positive feedback
+            # ("raise Q along the policy's actions") makes Q diverge and eventually NaN. Therefore:
+            #   1) Critic backward + critic step consume the critic gradients first;
+            #   2) Critic parameters are detached from the graph (requires_grad=False) while the policy and alpha
+            #      losses are backpropagated;
+            #   3) Policy and alpha optimizers step together, and the critic requires_grad flags are restored for
+            #      the next iteration.
+            #
+            # The policy/alpha forward pass must also happen after the critic step: the inplace parameter update
+            # would invalidate the version counters of any graph already built through the critics.
+
+            if do_learn:
+                critic_params = list(self.critic1.parameters()) + list(self.critic2.parameters())
+
+                self.scaler.scale(critic_loss).backward()
+                # Gradient clipping: https://pytorch.org/docs/stable/notes/amp_examples.html#gradient-clipping
+                self.scaler.unscale_(self.critic_optimizer)
+                grad_norm_critic = torch.nn.utils.clip_grad_norm_(critic_params, config_copy.clip_grad_norm)
+                self.scaler.step(self.critic_optimizer)
+                self.diagnostics["grad_norm_critic"] = grad_norm_critic.item()
+
+            # ===============================================
+            #   POLICY + ALPHA LOSS
             # ===============================================
             _tau_p, tau_hat_p = self._sample_tau(self.batch_size)
             new_action, log_pi = self._sample_policy(self.policy, state_img_tensor, state_float_tensor, False)
@@ -402,27 +433,24 @@ class Trainer:
             total_loss = critic_loss + policy_loss + alpha_loss
 
             if do_learn:
-                self.scaler.scale(critic_loss).backward()
-                self.scaler.scale(policy_loss).backward()
-                self.scaler.scale(alpha_loss).backward()
+                critic_param_requires_grad = [p.requires_grad for p in critic_params]
+                for p in critic_params:
+                    p.requires_grad_(False)
+                self.scaler.scale(policy_loss + alpha_loss).backward()
+                for p, requires_grad in zip(critic_params, critic_param_requires_grad):
+                    p.requires_grad_(requires_grad)
 
-                # Gradient clipping : https://pytorch.org/docs/stable/notes/amp_examples.html#gradient-clipping
-                for optimizer in (self.policy_optimizer, self.critic_optimizer, self.alpha_optimizer):
-                    self.scaler.unscale_(optimizer)
+                self.scaler.unscale_(self.policy_optimizer)
+                self.scaler.unscale_(self.alpha_optimizer)
                 grad_norm_policy = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config_copy.clip_grad_norm)
-                grad_norm_critic = torch.nn.utils.clip_grad_norm_(
-                    list(self.critic1.parameters()) + list(self.critic2.parameters()), config_copy.clip_grad_norm
-                )
                 torch.nn.utils.clip_grad_norm_(self.alpha_optimizer.param_groups[0]["params"], config_copy.clip_grad_norm)
                 grad_norm = max(grad_norm_policy.item(), grad_norm_critic.item())
 
                 self.scaler.step(self.policy_optimizer)
-                self.scaler.step(self.critic_optimizer)
                 self.scaler.step(self.alpha_optimizer)
                 self.scaler.update()
 
                 self.diagnostics["grad_norm_policy"] = grad_norm_policy.item()
-                self.diagnostics["grad_norm_critic"] = grad_norm_critic.item()
 
                 # ===============================================
                 #   UPDATE BUFFER PRIORITIES
