@@ -423,19 +423,19 @@ class GameInstanceManager:
                     end_race_stats["race_finished"] = False
                     end_race_stats["race_time"] = config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms
                     end_race_stats["race_time_for_ratio"] = max(race_time_ms, 1)
-                    rollout_results["damages"][-1] += 1000
+                    # rollout_results["damages"][-1] += 1000
                     this_rollout_is_finished = True
                     print(f"[TRUNCATION] vehicle {self.tmi_port} timed out at zone {current_zone_idx}")
                     break
 
                 # Vehicle got too damaged
-                if state["damage_overall"] >= config_copy.max_damage_ceiling:
-                # if sum(1 for damage in rollout_results["damages"] if damage >= config_copy.max_damage_ceiling) >= config_copy.temporal_mini_race_duration_actions:
+                # if state["damage_overall"] >= config_copy.max_damage_ceiling:
+                if sum(1 for damage in rollout_results["damages"] if damage >= config_copy.max_damage_ceiling) >= config_copy.temporal_mini_race_duration_actions:
                     # print("max damage exceeded and timeout reached")
                     end_race_stats["race_finished"] = False
                     end_race_stats["race_time"] = config_copy.cutoff_rollout_if_race_not_finished_within_duration_ms
                     end_race_stats["race_time_for_ratio"] = max(race_time_ms, 1)
-                    rollout_results["damages"][-1] = state["damage_overall"] # overwrite last actual damage level
+                    # rollout_results["damages"][-1] = state["damage_overall"] # overwrite last actual damage level
                     this_rollout_is_finished = True
                     print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
                     break

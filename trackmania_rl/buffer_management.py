@@ -82,8 +82,8 @@ def fill_buffer_from_rollout_with_n_steps_rule(
         # if rollout_results["current_zone_idx"][i] >= 41560: # hard coded finish zone idx
         #     reward_into[i] += 10
         
-        if vehicle_remaining_health <= 0:
-            reward_into[i] += config_copy.crashed_penalty
+        # if vehicle_remaining_health <= 0:
+        #     reward_into[i] += config_copy.crashed_penalty
         
         if i < n_frames - 1:
             if config_copy.final_speed_reward_per_m_per_s != 0 and rollout_results["state_float"][i][53] > 0:
