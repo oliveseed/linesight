@@ -71,7 +71,7 @@ class VehicleInterface:
             name=f"camera{veh_idx}", bng=game, vehicle=veh,
             requested_update_time=0.05, # requested_update_time=-1,
             resolution=(160, 120), near_far_planes=(0.05, 250.0),
-            pos=(0, -1.25, 1.25), dir=(0, 0, 0),
+            pos=(0, -1.25, 1.25), dir=(0, 0, 0), field_of_view_y=70.0,
             is_streaming=True, is_using_shared_memory=True,
             is_render_annotations=False, is_render_depth=True,
         )

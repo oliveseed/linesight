@@ -4,21 +4,7 @@ BeamNG reinforcement learning project using IQN (Implicit Quantile Network).
 
 ## Quick Start
 
-```bash
-# pip (requires conda for numpy/numba/torch first)
-pip install -e .
-```
-
-Python 3.10 or 3.11 required (constrained in `pixi.toml` and `setup.py`). When running scripts, use the existing virtual environment which already has all requirements installed.
-
-## Linting
-
-```bash
-ruff check trackmania_rl/ scripts/ config_files/
-ruff format trackmania_rl/ scripts/ config_files/
-```
-
-Line length is 140. Ruff config lives in `pyproject.toml`. There is no CI, no typecheck, and no test suite.
+Run python in the project's virtual environment which already has all requirements installed. If you cannot find it or are unable to activate it, abort. Do not install requirements outside the project's environment.
 
 ## Running
 
