@@ -41,6 +41,7 @@ for run_dir in sorted(glob.glob(f"tensorboard/{run_name}*")):
 - `ea.Tags()["scalars"]` lists every tag; `ea.Scalars("<tag>")` returns `(step, value)` events.
 - Per-parameter `_L2` tags (`layer_*_L2`, `lr_ratio_*_L2`, `exp_avg_*_L2`, `exp_avg_sq_*_L2`) are RMS values, written every ~5 minutes.
 - Commonly useful tags: `loss`, `loss_test`, `grad_norm_history_{median,max,d98}`, `learning_rate`, `weight_decay`, `avg_Q_*`, `eval_race_finished_*`, `single_zone_reached_*`, `cumul_number_batches_done`, `cumul_number_frames_played`.
+- Per-rollout diagnostics (one event per rollout, at the current step): `avg_reward_per_second_no_crash_or_timeout_penalty_*` (rollout reward with the `crashed_penalty` portion removed, over the true rollout duration), `wheels_off_track_pct_*` (percent of frames with at least one wheel outside the track), `rollout_duration_s_*` (true rollout duration, only for rollouts starting at the beginning zone).
 - The GUI can be started with `tensorboard --logdir tensorboard` (use `--logdir_spec` to overlay the split directories of one run).
 
 ## Architecture
