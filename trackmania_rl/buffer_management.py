@@ -57,6 +57,7 @@ def fill_buffer_from_rollout_with_n_steps_rule(
     )  # Discount factor that will be placed in front of next_step in Bellman equation, depending on n_steps chosen
 
     reward_into = np.zeros(n_frames)
+    n_crash_and_timeout_penalty_frames = 0  # frames where the crashed_penalty was applied (crashes, and timeouts via the phantom damage added on truncation)
     for i in range(1, n_frames):
         reward_into[i] += config_copy.constant_reward_per_ms * (
             config_copy.ms_per_action
@@ -76,12 +77,13 @@ def fill_buffer_from_rollout_with_n_steps_rule(
             progress_reward *= vehicle_traction             # penalize proportionally to the skid amount exceeding 10, up to 10+20
             progress_reward *= vehicle_remaining_health     # penalize proportionally to the damage level, up to max_damage_ceiling
         reward_into[i] += progress_reward
-        
+
         # if rollout_results["current_zone_idx"][i] >= 41560: # hard coded finish zone idx
         #     reward_into[i] += 10
-        
+
         if vehicle_remaining_health <= 0:
             reward_into[i] += config_copy.crashed_penalty
+            n_crash_and_timeout_penalty_frames += 1
         
         if i < n_frames - 1:
             if config_copy.final_speed_reward_per_m_per_s != 0 and rollout_results["state_float"][i][58] > 0:
@@ -177,4 +179,22 @@ def fill_buffer_from_rollout_with_n_steps_rule(
     elif len(Experiences_For_Buffer_Test) == 1:
         buffer_test.add(Experiences_For_Buffer_Test[0])
 
-    return buffer, buffer_test, number_memories_added_train, number_memories_added_test
+    # ===============================================
+    #   PER-ROLLOUT DIAGNOSTICS FOR TENSORBOARD
+    # ===============================================
+    # Total reward of this rollout, with the crashed_penalty removed.
+    # Note: timeout truncations also go through this counter, because they are
+    # implemented as a phantom +1000 damage on the last member of
+    # rollout_results["damages"] (see game_instance_manager), which makes
+    # vehicle_remaining_health <= 0 and triggers the same crashed_penalty.
+    reward_excluding_crash_and_timeout_penalties = float(
+        reward_into.sum() - n_crash_and_timeout_penalty_frames * config_copy.crashed_penalty
+    )
+    wheels_off_track_pct = 100.0 * float(
+        np.mean(np.asarray(rollout_results["wheels_off_track"], dtype=np.float32) > 0)
+    )
+
+    return buffer, buffer_test, number_memories_added_train, number_memories_added_test, {
+        "reward_sum_excluding_crash_and_timeout_penalties": reward_excluding_crash_and_timeout_penalties,
+        "wheels_off_track_pct": wheels_off_track_pct,
+    }

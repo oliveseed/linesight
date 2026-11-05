@@ -435,6 +435,7 @@ def learner_process_fn(
                 buffer_test,
                 number_memories_added_train,
                 number_memories_added_test,
+                rollout_metrics,
             ) = buffer_management.fill_buffer_from_rollout_with_n_steps_rule(
                 buffer,
                 buffer_test,
@@ -455,6 +456,30 @@ def learner_process_fn(
                 config_copy.number_times_single_memory_is_used_before_discard * number_memories_added_train
             )
             print(f" NMG={accumulated_stats['cumul_number_memories_generated']:<8}")
+
+            # ===============================================
+            #   PER-ROLLOUT DIAGNOSTICS (TENSORBOARD)
+            # ===============================================
+            map_status = "explo" if is_explo else "eval"
+            rollout_diagnostics = {
+                f"avg_reward_per_second_no_crash_or_timeout_penalty_{map_status}_{map_name}":
+                    rollout_metrics["reward_sum_excluding_crash_and_timeout_penalties"]
+                    / max(end_race_stats["race_time_for_ratio"] / 1000, 1e-6),
+                f"wheels_off_track_pct_{map_status}_{map_name}":
+                    rollout_metrics["wheels_off_track_pct"],
+            }
+            if end_race_stats["is_start_at_beginning"]:
+                # Duration is only logged for rollouts that start at the beginning zone,
+                # where the duration is directly comparable between rollouts.
+                rollout_diagnostics[f"rollout_duration_s_{map_status}_{map_name}"] = end_race_stats["race_time_for_ratio"] / 1000
+            walltime_tb = time.time()
+            for tag, value in rollout_diagnostics.items():
+                tensorboard_writer.add_scalar(
+                    tag=tag,
+                    scalar_value=value,
+                    global_step=accumulated_stats["cumul_number_frames_played"],
+                    walltime=walltime_tb,
+                )
 
             # ===============================================
             #   PERIODIC RESET ?
