@@ -355,7 +355,7 @@ class GameInstanceManager:
                 )
 
                 # frame = self._blank_frame()
-                frame = self.iface.get_visual_input(vis_type="color")
+                frame = self.iface.get_visual_input(vis_type="depth")
                 # print(frame)
                 # TODO: check if first frame of rollout is black
 
