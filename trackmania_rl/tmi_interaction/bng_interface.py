@@ -98,6 +98,9 @@ class VehicleInterface:
             return vis_gray
         elif vis_type == "depth":
             vis_depth = np.frombuffer(raw_readings['depth'], dtype=np.float32).reshape((120, 160))
+            vis_depth = np.nan_to_num(vis_depth, nan=1.0, posinf=1.0, neginf=0.0)
+            vis_depth = np.clip(vis_depth, 0.0, 1.0)
+            vis_depth = np.round(vis_depth * 255.0).astype(np.uint8)
             vis_depth = np.expand_dims(vis_depth, axis=0)
             return vis_depth
 
