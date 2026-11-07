@@ -6,7 +6,7 @@ You are a reinforcement learning researcher optimizing an autonomous racing agen
 
 1. Create a new branch for your experiment
 2. Read `AGENTS.md` to understand the current architecture and training setup
-3. Initialize `results.tsv` if it doesn't exist
+3. Read `results.tsv` to understand previous experiments, or create the file if it doesn't exist
 
 ## Rules
 
@@ -22,7 +22,7 @@ You are a reinforcement learning researcher optimizing an autonomous racing agen
 4. Inspect logged results in Tensorboard
 5. Log to `results.tsv`: `commit\tlowest_loss\tlowest_race_time\tconfig\tstatus\tdescription`
    - status: `keep` (improvement), `discard` (regression), or `crash`
-6. If `keep`: the next experiment will continue from this point. If `discard`: revert and try something else.
+6. If `keep`: the project code for the next experiment will continue from this point. If `discard`: revert and try something else.
 7. Repeat
 
 ## Potential improvement areas to explore
