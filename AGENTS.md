@@ -87,6 +87,7 @@ Audited from the `test_crap_21` run (TensorBoard) and a code review. These are u
 - **Replay buffer** — Uses `torchrl.data.ReplayBuffer` with optional `PrioritizedSampler`. Buffer resizing and n-step returns are handled in `buffer_utilities.py` and `buffer_management.py`. `buffer_utilities.py` implements buffer_collate_function(), used to customize torchrl’s ReplayBuffer.sample() method. The most important customization is our implementation of mini-races, a trick to define Q values as the expected sum of undiscounted rewards in the next 7 seconds.
 - **State normalization** — `config_files/state_normalization.py` defines per-feature mean/std arrays. The network normalizes internally in `forward()`.
 - **11 discrete actions** — Defined in `config_files/inputs_list.py` (throttle/brake/steer combinations).
+- **One-step action delay in rollouts** — `game_instance_manager.rollout()` and `inference_game_instance_manager.rollout()` execute the action computed at the *previous* state, send `step_complete()` immediately, and only then compute the next action while BeamNG runs the next 50 ms physics step. This overlaps inference with the simulation and keeps the game real-time when inference takes less than one physics step. The consequence is exactly one action period (50 ms of simulated time) of actuation delay; it does not multiply existing latency. `rollout_results["actions"]` records the action actually applied at each state (`pi(S_{t-1})`), so buffered transitions stay aligned.
 
 ## File Conventions
 

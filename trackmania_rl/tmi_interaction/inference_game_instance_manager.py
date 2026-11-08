@@ -301,6 +301,11 @@ class GameInstanceManager:
         n_th_action_we_compute = 0
         race_time_ms = 0
         furthest_zone_idx = 0
+        # One-step action delay: the action applied at the state we have just
+        # observed was computed from the previous state, while the game was
+        # stepping. The very first action has no predecessor yet, so the default
+        # forward action is used for the first transition of the rollout.
+        pending_action_idx = config_copy.action_forward_idx
 
         try:
             # Reset puts the vehicle at the start and clears its timers/state.
@@ -374,25 +379,26 @@ class GameInstanceManager:
                 #     print(f"[TRUNCATION] vehicle {self.tmi_port} timed out at zone {current_zone_idx}")
                 #     break
 
-                (
-                    action_idx,
-                    action_was_greedy,
-                    q_value,
-                    q_values,
-                ) = exploration_policy(frame, floats)
-
-                actions.append(action_idx)
-
                 # Vehicle got too damaged
                 # if state["damage_overall"] >= config_copy.max_damage_ceiling:
                 #     print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
                 #     this_rollout_is_finished = True
                 #     break
 
+                # Execute the action computed at the previous state, then let the
+                # game run the next physics step immediately. The policy below is
+                # overlapped with the simulation; the environment only waits if it
+                # finishes its step before the next action is ready.
+                action_idx = pending_action_idx
+                actions.append(action_idx)
+
                 self.request_inputs(action_idx)
                 # # Apply the same action for run_steps_per_action physics ticks.
                 # for _ in range(self.run_steps_per_action):
                 self.iface.step_complete()
+
+                pending_action_idx, _, _, _ = exploration_policy(frame, floats)
+
                 state = self.iface.get_state()
 
                 race_time_ms = int(round(float(state["sim_time"]) * 1000))

@@ -332,6 +332,11 @@ class GameInstanceManager:
         n_th_action_we_compute = 0
         race_time_ms = 0
         ms_per_physics_step = config_copy.ms_per_tm_engine_step
+        # One-step action delay: the action applied at the state we have just
+        # observed was computed from the previous state, while the game was
+        # stepping. The very first action has no predecessor yet, so the default
+        # forward action is used for the first transition of the rollout.
+        pending_decision = None
 
         try:
             # Reset puts the vehicle at the start and clears its timers/state.
@@ -352,10 +357,6 @@ class GameInstanceManager:
 
             this_rollout_is_finished = False
             while not this_rollout_is_finished:
-                if n_th_action_we_compute > 0 and n_th_action_we_compute % config_copy.update_inference_network_every_n_actions == 0:
-                    if update_network is not None:
-                        update_network()
-
                 position = np.asarray(state["position"], dtype=np.float32)
                 current_zone_idx = update_current_zone_idx(
                     current_zone_idx,
@@ -442,15 +443,35 @@ class GameInstanceManager:
                     print(f"[TRUNCATION] vehicle {self.tmi_port} crashed at zone {current_zone_idx} {state['damage_overall']}")
                     break
 
+                # The action executed at this state was computed at the previous
+                # state, while the game was running the previous physics step.
+                # The first action of a rollout has no predecessor yet.
+                if pending_decision is None:
+                    action_idx = config_copy.action_forward_idx
+                    action_was_greedy = True
+                else:
+                    action_idx, action_was_greedy, _, _ = pending_decision
+
+                # Let the game run the next physics step immediately. Everything
+                # below until get_state() is overlapped with the simulation; the
+                # environment only waits if it finishes its step before the next
+                # action is ready.
+                pc_input = time.perf_counter_ns()
+                self.request_inputs(action_idx)
+                self.iface.step_complete()
+                end_race_stats["instrumentation__request_inputs_and_speed"] += time.perf_counter_ns() - pc_input
+
+                if n_th_action_we_compute > 0 and n_th_action_we_compute % config_copy.update_inference_network_every_n_actions == 0:
+                    if update_network is not None:
+                        update_network()
+
                 pc_policy = time.perf_counter_ns()
-                (
-                    action_idx,
-                    action_was_greedy,
-                    q_value,
-                    q_values,
-                ) = exploration_policy(frame, floats)
+                pending_decision = exploration_policy(frame, floats)
                 end_race_stats["instrumentation__exploration_policy"] += time.perf_counter_ns() - pc_policy
 
+                # q-values belong to the state we just observed (diagnostics); the
+                # action recorded below is the delayed one actually applied here.
+                q_value, q_values = pending_decision[2], pending_decision[3]
                 if n_th_action_we_compute == 0:
                     end_race_stats["value_starting_frame"] = q_value
                     for i, val in enumerate(np.nditer(q_values)):
@@ -482,11 +503,6 @@ class GameInstanceManager:
                         action_was_greedy=action_was_greedy,
                     )
 
-                pc_input = time.perf_counter_ns()
-                end_race_stats["instrumentation__request_inputs_and_speed"] += time.perf_counter_ns() - pc_input
-
-                self.request_inputs(action_idx)
-                self.iface.step_complete()
                 state = self.iface.get_state()
 
                 race_time_ms = int(round(float(state["sim_time"]) * 1000))
